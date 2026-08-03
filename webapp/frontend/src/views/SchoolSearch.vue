@@ -175,12 +175,13 @@ onMounted(() => {
       </div>
     </section>
 
-    <!-- 详情弹窗 -->
-    <el-dialog
+    <!-- 详情抽屉（右侧滑出，与专业查询一致） -->
+    <el-drawer
       v-model="dialogVisible"
       :title="current?.name"
-      width="720px"
-      top="5vh"
+      :size="480"
+      direction="rtl"
+      :with-header="true"
       class="hot-dialog"
     >
       <div v-if="current" class="hot-detail">
@@ -242,7 +243,7 @@ onMounted(() => {
           @click="goSchool(current.code)"
         >查看完整招生数据 →</el-button>
       </div>
-    </el-dialog>
+    </el-drawer>
 
     <!-- 院校详情抽屉（右侧滑出，与专业查询一致） -->
     <SchoolDrawer v-model:code="detailCode" />
@@ -295,7 +296,7 @@ onMounted(() => {
 /* 详情弹窗 */
 .hot-detail__cats { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: var(--space-3); }
 .hot-detail__img { width: 100%; height: auto; border-radius: var(--radius-md); margin-bottom: var(--space-4); background: #f5f7fa; }
-.kv { display: grid; grid-template-columns: repeat(4, 1fr); gap: var(--space-3) var(--space-5); margin-bottom: var(--space-4); }
+.kv { display: grid; grid-template-columns: repeat(2, 1fr); gap: var(--space-3) var(--space-5); margin-bottom: var(--space-4); }
 .kv__item { display: flex; flex-direction: column; gap: 2px; }
 .kv__item--full { grid-column: 1 / -1; }
 .kv__k { font-size: var(--text-xs); color: var(--color-text-muted); }
