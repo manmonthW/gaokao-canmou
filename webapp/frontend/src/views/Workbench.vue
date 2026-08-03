@@ -41,7 +41,7 @@ const COMPARE_ROWS: { label: string; get: (c: CandidateSnapshot) => string }[] =
   { label: '批次', get: (c) => c.batch },
   { label: '省份/城市', get: (c) => `${c.province || '—'}${c.city ? '·' + c.city : ''}` },
   { label: '层次/性质/类型', get: (c) => [c.level, c.nature, c.type].filter(Boolean).join(' / ') || '—' },
-  { label: '近一年最低位次', get: (c) => fmt(c.last_year_rank) },
+  { label: '近年最低位次（2026）', get: (c) => fmt(c.last_year_rank) },
   { label: '近一年最低分', get: (c) => (c.last_year_score != null ? String(c.last_year_score) : '—') },
   { label: '最好 / 最差 / 中位', get: (c) => `${fmt(c.best_rank)} / ${fmt(c.worst_rank)} / ${fmt(c.median_rank)}` },
   { label: '位次跨度（波动）', get: (c) => `${fmt(c.span)}${c.relative_vol != null ? `（${Math.round(c.relative_vol * 100)}%）` : ''}` },
@@ -191,7 +191,7 @@ async function exportPlan(p: VolunteerPlan) {
             <el-table-column label="城市" width="110">
               <template #default="{ row }">{{ row.province }}{{ row.city ? '·' + row.city : '' }}</template>
             </el-table-column>
-            <el-table-column label="近一年位次" width="110" align="right">
+            <el-table-column label="近年最低位次（2026）" width="130" align="right">
               <template #default="{ row }"><span class="tnum">{{ fmt(row.last_year_rank) }}</span></template>
             </el-table-column>
             <el-table-column label="位次差" width="110" align="center">
@@ -277,7 +277,7 @@ async function exportPlan(p: VolunteerPlan) {
               </el-table-column>
               <el-table-column prop="school_name" label="院校" min-width="150" show-overflow-tooltip />
               <el-table-column prop="major_name" label="专业" min-width="150" show-overflow-tooltip />
-              <el-table-column label="往年最低分/位次" width="150" align="right">
+              <el-table-column label="2026最低分/位次" width="150" align="right">
                 <template #default="{ row }">
                   <span class="tnum">{{ row.last_year_score ?? '—' }}</span> /
                   <span class="tnum">{{ fmt(row.last_year_rank) }}</span>

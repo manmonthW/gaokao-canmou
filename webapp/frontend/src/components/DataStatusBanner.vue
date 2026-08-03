@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { api } from '@/api/client'
 
 const status = ref<any>(null)
@@ -15,6 +15,15 @@ onMounted(async () => {
   }
 })
 
+// 当前年度「普通类·专科批(常规)」官方尚未发布、且库内无对应数据，
+// 属于悬空待发布项，不在横幅展示（仍保留于发布状态表，便于后续跟踪）。
+const HIDDEN_PENDING = (b: { category?: string; batch?: string }) =>
+  !(b.category === '普通类' && b.batch === '专科批')
+
+const visiblePending = computed(() =>
+  (status.value?.pending_batches ?? []).filter(HIDDEN_PENDING)
+)
+
 function fmt(s?: string | null): string {
   return s ? s.replace('T', ' ').slice(0, 19) : '—'
 }
@@ -23,7 +32,7 @@ function fmt(s?: string | null): string {
 <template>
   <div v-if="!loading && status" class="ds-banner">
     <el-alert
-      v-if="status.pending_batches && status.pending_batches.length"
+      v-if="visiblePending.length"
       type="warning"
       :closable="false"
       show-icon
@@ -32,7 +41,7 @@ function fmt(s?: string | null): string {
       <template #title>当前年度部分批次尚未发布或入库</template>
       <div class="ds-banner__tags">
         <el-tag
-          v-for="(b, i) in status.pending_batches"
+          v-for="(b, i) in visiblePending"
           :key="i"
           type="warning"
           effect="light"

@@ -63,7 +63,7 @@ const refYearsText = computed(() =>
       <el-form :inline="false" label-width="96px" class="form">
         <div class="form__row">
           <el-form-item label="考生年份">
-            <el-input :model-value="`${EXAMINEE_YEAR} 年（今年）`" disabled style="width: 160px" />
+            <el-input :model-value="`${EXAMINEE_YEAR} 年（预报）`" disabled style="width: 160px" />
           </el-form-item>
           <el-form-item label="类别">
             <el-select v-model="profile.category" style="width: 140px">

@@ -211,7 +211,25 @@ onMounted(() => {
           <div class="kv__item" v-if="current.grad_recommend_rate"><span class="kv__k">保研率</span><span class="kv__v">{{ current.grad_recommend_rate }}</span></div>
           <div class="kv__item" v-if="current.master_points != null"><span class="kv__k">硕士点</span><span class="kv__v tnum">{{ current.master_points }}</span></div>
           <div class="kv__item" v-if="current.doctor_points != null"><span class="kv__k">博士点</span><span class="kv__v tnum">{{ current.doctor_points }}</span></div>
-          <div class="kv__item kv__item--full" v-if="current.ranking"><span class="kv__k">学校排名</span><span class="kv__v">{{ current.ranking }}</span></div>
+        </div>
+
+        <div class="hot-block" v-if="current.ranking_items && current.ranking_items.length">
+          <div class="hot-block__title">学校排名</div>
+          <el-table :data="current.ranking_items" size="small" border class="rank-tbl">
+            <el-table-column prop="source" label="榜单" min-width="90" />
+            <el-table-column label="排名" width="90" align="right">
+              <template #default="{ row }">
+                <span class="tnum" v-if="row.rank != null">{{ row.rank }}</span>
+                <span v-else class="dim">—</span>
+              </template>
+            </el-table-column>
+            <el-table-column prop="year" label="年份" width="90" align="right">
+              <template #default="{ row }">
+                <span class="tnum" v-if="row.year">{{ row.year }}</span>
+                <span v-else class="dim">—</span>
+              </template>
+            </el-table-column>
+          </el-table>
         </div>
 
         <div class="hot-block" v-if="current.intro">
@@ -305,4 +323,6 @@ onMounted(() => {
 .hot-block__title { font-weight: 600; font-size: var(--text-sm); margin-bottom: var(--space-2); color: var(--color-text-secondary); }
 .hot-block__text { margin: 0; font-size: var(--text-sm); line-height: 1.9; color: var(--color-text-secondary); white-space: pre-wrap; }
 .hot-detail__link { margin-top: var(--space-2); }
+.rank-tbl { margin-top: var(--space-1); }
+.dim { color: var(--color-text-muted); }
 </style>

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { getJson } from '@/api/client'
 import type { DataStatusResponse, MetaResponse } from '@/types'
 
@@ -26,6 +26,15 @@ onMounted(async () => {
 function fmtDateTime(s?: string | null): string {
   return s ? s.replace('T', ' ').slice(0, 19) : '—'
 }
+
+// 当前年度「普通类·专科批(常规)」官方尚未发布、且库内无对应数据，
+// 属于悬空待发布项，不在首页横幅展示（仍保留于发布状态表，便于后续跟踪）。
+const HIDDEN_PENDING = (b: { category?: string; batch?: string }) =>
+  !(b.category === '普通类' && b.batch === '专科批')
+
+const visiblePending = computed(() =>
+  (status.value?.pending_batches ?? []).filter(HIDDEN_PENDING)
+)
 </script>
 
 <template>
@@ -51,7 +60,7 @@ function fmtDateTime(s?: string | null): string {
     <template v-else-if="status">
       <!-- 待发布批次横幅：必须显式展示，不藏说明页 -->
       <el-alert
-        v-if="status.pending_batches.length"
+        v-if="visiblePending.length"
         type="warning"
         :closable="false"
         show-icon
@@ -62,7 +71,7 @@ function fmtDateTime(s?: string | null): string {
         </template>
         <div class="banner__list">
           <el-tag
-            v-for="(b, i) in status.pending_batches"
+            v-for="(b, i) in visiblePending"
             :key="i"
             type="warning"
             effect="light"

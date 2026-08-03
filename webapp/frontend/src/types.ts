@@ -523,6 +523,7 @@ export interface HotSchool {
   master_points: number | null
   doctor_points: number | null
   ranking: string | null
+  ranking_items: { source: string; rank: number | null; year: string | null }[]
   intro: string | null
   discipline_eval: string | null
   features: string | null

@@ -325,7 +325,7 @@ onMounted(async () => {
           <el-table-column label="省份/城市" min-width="120">
             <template #default="{ row }">{{ row.province }}{{ row.city ? '·' + row.city : '' }}</template>
           </el-table-column>
-          <el-table-column :label="`${data.examinee.year}位次`" width="110" align="right">
+          <el-table-column label="近年最低位次（2026）" width="130" align="right">
             <template #default="{ row }"><span class="tnum">{{ row.last_year_rank?.toLocaleString() }}</span></template>
           </el-table-column>
           <el-table-column label="最好/最差/中位" align="right" min-width="170">

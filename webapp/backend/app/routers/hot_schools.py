@@ -12,9 +12,67 @@ from fastapi import APIRouter, Query, HTTPException
 from fastapi.responses import FileResponse
 from typing import Optional
 import os
+import re
 from app import db
 
 router = APIRouter(prefix="/hot-schools", tags=["hot-schools"])
+
+# 「学校排名」区块在卡片中是一个三柱图：易度排名 / 校友会 / 软科，各带排名值与年份。
+# OCR 后文字严重错乱（数字、标签、年份混排且夹杂噪声）。此处在读取层做「尽力而为」
+# 的结构化解析，不改动库内原始 OCR 文本（无损、可回退）。解析不可靠时返回空，
+# 前端隐藏文字块——卡片原图仍展示真实的排名柱状图。
+_RANK_SOURCES = ["易度排名", "校友会", "软科"]
+# 出现这些词说明该 ranking 字段其实混入了「院校简介」等正文，视为无有效排名
+_RANK_JUNK_MARKERS = ["创办", "简称", "前身", "创立", "建校", "学位委员会", "研究生院",
+                       "一级学科", "硕士点", "博士点"]
+
+
+def parse_ranking(raw):
+    """把错乱的 ranking OCR 文本解析成 [{source, rank, year}]。
+
+    规则（保守）：
+      - 若文本不含任何排名来源标签（易度排名/校友会/软科），或混入正文标志词 → 返回 []；
+      - 否则按固定顺序取出「出现过的来源」，用标签前的前导小整数(1~3 位)作为排名候选，
+        用文本中的 20xx 作为年份候选，按位置配对；数量不匹配时尽量配对，缺失留空。
+    """
+    if not raw or not isinstance(raw, str):
+        return []
+    text = raw.strip()
+    if not text:
+        return []
+    # 含正文标志词 → 该字段是脏数据（简介误入），不展示排名
+    if any(m in text for m in _RANK_JUNK_MARKERS):
+        return []
+    # 出现过的来源（按固定顺序）
+    present = [s for s in _RANK_SOURCES if s in text]
+    if not present:
+        return []
+    # 第一个来源标签出现的位置
+    first_label_pos = min(text.find(s) for s in present if text.find(s) >= 0)
+    head = text[:first_label_pos]
+    tail = text[first_label_pos:]
+    # 前导区的小整数（1~3 位，非 20xx）作为排名候选；排名合理区间 1~300
+    ranks = []
+    for n in re.findall(r"\d{1,3}", head):
+        if re.fullmatch(r"20\d\d", n):
+            continue
+        v = int(n)
+        if 1 <= v <= 300:
+            ranks.append(v)
+    # 标签区之后的 20xx 作为年份候选；合理区间 2018~2026
+    years = [y for y in re.findall(r"20\d\d", tail) if 2018 <= int(y) <= 2026]
+    items = []
+    for i, src in enumerate(present):
+        items.append({
+            "source": src,
+            "rank": ranks[i] if i < len(ranks) else None,
+            "year": years[i] if i < len(years) else None,
+        })
+    # 若一个排名值都没解析出来，视为不可靠，返回空
+    if all(it["rank"] is None for it in items):
+        return []
+    return items
+
 
 # 图片根目录（与 OCR 入库脚本一致），用于图片端点路径白名单
 # __file__ = .../webapp/backend/app/routers/hot_schools.py
@@ -70,6 +128,7 @@ async def list_schools(category: Optional[str] = Query(None, description="按分
             r,
         ))
         d["has_image"] = bool(d.pop("image_path"))
+        d["ranking_items"] = parse_ranking(d.get("ranking"))
         out.append(d)
     return {"schools": out, "count": len(out)}
 
