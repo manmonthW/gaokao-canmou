@@ -2,6 +2,7 @@
 import { ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { api } from '@/api/client'
+import SchoolDrawer from '@/components/SchoolDrawer.vue'
 import type { HotSchool, HotSchoolCategory } from '@/types'
 
 const router = useRouter()
@@ -10,6 +11,9 @@ const results = ref<any[]>([])
 const loading = ref(false)
 const error = ref<string | null>(null)
 const searched = ref(false)
+
+// 院校详情抽屉（复用 SchoolDrawer，右侧滑出，与专业查询体验一致）
+const detailCode = ref<string | null>(null)
 
 async function onSearch() {
   if (!q.value.trim()) return
@@ -26,7 +30,7 @@ async function onSearch() {
 }
 
 function open(code: string) {
-  router.push(`/school/${code}`)
+  detailCode.value = code
 }
 
 // ---- 热门大学介绍 ----
@@ -67,7 +71,7 @@ function openHot(s: HotSchool) {
 function goSchool(code?: string | null) {
   if (code) {
     dialogVisible.value = false
-    open(code)
+    router.push(`/school/${code}`)
   }
 }
 
@@ -239,6 +243,9 @@ onMounted(() => {
         >查看完整招生数据 →</el-button>
       </div>
     </el-dialog>
+
+    <!-- 院校详情抽屉（右侧滑出，与专业查询一致） -->
+    <SchoolDrawer v-model:code="detailCode" />
   </div>
 </template>
 
