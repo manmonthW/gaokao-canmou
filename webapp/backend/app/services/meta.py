@@ -1,0 +1,56 @@
+"""元数据服务：下拉枚举（年份/科类/选科/批次/层次/性质/类型/省份）。"""
+from app import db
+
+
+async def get_meta():
+    years = await db.fetch_all(
+        "SELECT DISTINCT year FROM admission_scores ORDER BY year")
+    categories = await db.fetch_all(
+        "SELECT DISTINCT category FROM admission_scores ORDER BY category")
+    subjects = await db.fetch_all(
+        "SELECT DISTINCT subject FROM admission_scores "
+        "WHERE subject IS NOT NULL ORDER BY subject")
+    batches = await db.fetch_all(
+        "SELECT DISTINCT batch FROM admission_scores "
+        "WHERE batch IS NOT NULL ORDER BY batch")
+    # 科类→批次映射：供前端「原始记录」筛选时按已选科类联动批次下拉，
+    # 避免把「专科批」等跨科类共享的批次值在未选科类时平铺，误导用户
+    # （如普通类考生看到艺术/体育专属批次）。数据驱动，无硬编码。
+    batch_by_cat_rows = await db.fetch_all(
+        "SELECT DISTINCT category, batch FROM admission_scores "
+        "WHERE batch IS NOT NULL AND category IS NOT NULL "
+        "ORDER BY category, batch")
+    score_kinds = await db.fetch_all(
+        "SELECT DISTINCT score_kind FROM admission_scores "
+        "WHERE score_kind IS NOT NULL ORDER BY score_kind")
+    provinces = await db.fetch_all(
+        "SELECT DISTINCT province FROM school_profiles "
+        "WHERE province IS NOT NULL ORDER BY province")
+    levels = await db.fetch_all(
+        "SELECT DISTINCT level FROM school_profiles "
+        "WHERE level IS NOT NULL ORDER BY level")
+    natures = await db.fetch_all(
+        "SELECT DISTINCT nature FROM school_profiles "
+        "WHERE nature IS NOT NULL ORDER BY nature")
+    types = await db.fetch_all(
+        "SELECT DISTINCT type FROM school_profiles "
+        "WHERE type IS NOT NULL ORDER BY type")
+
+    # 组装科类→批次映射
+    batches_by_category: dict[str, list[str]] = {}
+    for cat, bat in batch_by_cat_rows:
+        batches_by_category.setdefault(cat, []).append(bat)
+
+    return {
+        "years": [r[0] for r in years],
+        "categories": [r[0] for r in categories],
+        "subjects": [r[0] for r in subjects],
+        "batches": [r[0] for r in batches],
+        "batches_by_category": batches_by_category,
+        "score_kinds": [r[0] for r in score_kinds],
+        "provinces": [r[0] for r in provinces],
+        "levels": [r[0] for r in levels],
+        "natures": [r[0] for r in natures],
+        "types": [r[0] for r in types],
+        "flags": ["985", "211", "双一流"],
+    }

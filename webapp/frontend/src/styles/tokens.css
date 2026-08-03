@@ -1,0 +1,79 @@
+/* ============================================================
+   设计 Token —— 基于 Stripe 设计系统适配（awesome-design-md）
+   适配要点：
+   1) 中文字体栈优先 PingFang SC / 微软雅黑 / 思源黑体，去除 CJK 负字距；
+   2) 字重上提：正文 400、UI 500、标题 600/700（Stripe 原签名 300 偏轻）；
+   3) 主色由 Stripe 紫改为可信蓝（考生/家长场景更亲和）；
+   4) 数字使用等宽数字（tnum），分数/位次对齐不跳动。
+   ============================================================ */
+:root {
+  /* 主色：可信蓝（替代 Stripe #635bff 紫） */
+  --color-primary: #2563eb;
+  --color-primary-hover: #1d4ed8;
+  --color-primary-soft: #eef4ff;
+
+  /* 文本 */
+  --color-text: #0a2540;        /* Stripe navy */
+  --color-text-secondary: #425466;
+  --color-text-muted: #697386;
+
+  /* 背景与边框 */
+  --color-bg: #f6f9fc;
+  --color-surface: #ffffff;
+  --color-border: #e3e8ee;
+  --color-border-strong: #d5dbe3;
+
+  /* 语义色（风险标签） */
+  --color-reach: #f5a623;      /* 冲（有风险，琥珀） */
+  --color-reach-soft: #fdf3e2;
+  --color-match: #1bb978;      /* 稳（绿） */
+  --color-match-soft: #e7f8f0;
+  --color-safe: #2563eb;       /* 保（蓝） */
+  --color-safe-soft: #eef4ff;
+  --color-volatile: #7a5af8;   /* 高波动（紫） */
+  --color-volatile-soft: #f1edff;
+  --color-insufficient: #8792a2;/* 数据不足（灰） */
+  --color-insufficient-soft: #eef1f4;
+  --color-danger: #e25950;
+
+  /* 圆角 */
+  --radius-sm: 6px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+
+  /* 阴影（Stripe 风格：克制、低透明度） */
+  --shadow-sm: 0 1px 1px rgba(10, 37, 64, 0.03), 0 1px 3px rgba(10, 37, 64, 0.04);
+  --shadow-md: 0 1px 1px rgba(10, 37, 64, 0.03), 0 4px 10px rgba(10, 37, 64, 0.06);
+  --shadow-lg: 0 2px 5px rgba(10, 37, 64, 0.04), 0 12px 28px rgba(10, 37, 64, 0.10);
+
+  /* 间距（4px 基准） */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-8: 32px;
+
+  /* 字号 */
+  --text-xs: 12px;
+  --text-sm: 13px;
+  --text-base: 14px;
+  --text-lg: 16px;
+  --text-xl: 20px;
+  --text-2xl: 26px;
+
+  /* 字体 */
+  --font-sans: "PingFang SC", "Microsoft YaHei", "Source Han Sans SC",
+    "Noto Sans CJK SC", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+    Helvetica, Arial, sans-serif;
+  --font-mono: "SF Mono", "JetBrains Mono", "Roboto Mono", Menlo, Consolas,
+    monospace;
+}
+
+/* 等宽数字：分数、位次、位次差统一对齐 */
+.tnum {
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum" 1;
+  font-family: var(--font-mono);
+}

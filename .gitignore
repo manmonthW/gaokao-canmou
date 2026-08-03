@@ -1,0 +1,45 @@
+# ============ 密钥与本地环境（禁止入库）============
+**/.env
+**/.env.local
+**/.env.*.local
+
+# ============ 用户数据 / PII（禁止入库）============
+**/backend/data/
+*.db
+*.sqlite
+*.sqlite3
+
+# ============ 数据库备份 dump（含真实录取数据，禁止入库）============
+etl/backups/
+
+# ============ Python ============
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+.pytest_cache/
+
+# ============ Node / 前端构建 ============
+node_modules/
+dist/
+*.local
+
+# ============ 大体积原始素材与数据（不适合入库，另行存档）============
+# 数百 MB 的图片/PDF 素材库
+2026allmaterial/
+# 原始下载的分数文件（PDF/xls/xlsx/md），体积大且非源码
+2025/
+2026/
+etl/score_rank_pdf/
+etl/data/*.xls
+etl/data/*.xlsx
+# ETL 运行日志
+etl/enrich_log.jsonl
+etl/enrich_review.jsonl
+
+# ============ 系统/编辑器 ============
+.DS_Store
+*.swp
+.idea/
+.vscode/
