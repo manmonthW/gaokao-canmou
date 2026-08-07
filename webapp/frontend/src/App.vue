@@ -53,18 +53,27 @@ const steps = computed(() => [
   },
 ])
 
-// 资料库（工具，无序、随时查）
+// 资料库（工具，无序、随时查）：图标分段按钮，各入口独立配色便于区分
 const library = [
-  { to: '/search/school', label: '院校查询' },
-  { to: '/search/major', label: '专业查询' },
-  { to: '/datacenter', label: '数据中心' },
+  {
+    to: '/search/school',
+    label: '院校查询',
+    icon: 'school',
+    style: '--icon: var(--color-primary); --icon-soft: var(--color-primary-soft)',
+  },
+  {
+    to: '/search/major',
+    label: '专业查询',
+    icon: 'book',
+    style: '--icon: var(--color-volatile); --icon-soft: var(--color-volatile-soft)',
+  },
+  {
+    to: '/datacenter',
+    label: '数据中心',
+    icon: 'chart',
+    style: '--icon: var(--color-match); --icon-soft: var(--color-match-soft)',
+  },
 ]
-const libraryActive = computed(() =>
-  ['school-search', 'major-search', 'school-detail', 'school-major', 'datacenter'].includes(
-    String(route.name),
-  ),
-)
-
 // 登录页等公开页不显示应用外壳（顶栏 + 步骤条）
 const chromeless = computed(() => route.meta.public === true || !auth.isLoggedIn.value)
 </script>
@@ -79,10 +88,23 @@ const chromeless = computed(() => route.meta.public === true || !auth.isLoggedIn
         </RouterLink>
         <span class="brand__tag">辽宁高考录取数据 · 志愿决策辅助</span>
 
-        <!-- 资料库：工具入口，弱化、置于右上 -->
-        <nav class="lib-nav" :class="{ 'lib-nav--active': libraryActive }">
-          <span class="lib-nav__label">资料库</span>
-          <RouterLink v-for="l in library" :key="l.to" :to="l.to" class="lib-nav__link">
+        <!-- 资料库：工具入口，图标 + 文字分段按钮，置于右上 -->
+        <nav class="lib-nav" aria-label="资料库">
+          <RouterLink
+            v-for="l in library"
+            :key="l.to"
+            :to="l.to"
+            class="lib-btn"
+            :style="l.style"
+          >
+            <span class="lib-btn__icon" aria-hidden="true">
+              <!-- 院校：学位帽 -->
+              <svg v-if="l.icon === 'school'" viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 10 12 5 2 10l10 5z"/><path d="M6 12v5c3 3 9 3 12 0v-5"/></svg>
+              <!-- 专业：翻开的书 -->
+              <svg v-else-if="l.icon === 'book'" viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 4h6a4 4 0 0 1 4 4v13a3 3 0 0 0-3-3H2z"/><path d="M22 4h-6a4 4 0 0 0-4 4v13a3 3 0 0 1 3-3h7z"/></svg>
+              <!-- 数据：柱状图 -->
+              <svg v-else viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v18h18"/><path d="M18 17V9M13 17V5M8 17v-3"/></svg>
+            </span>
             {{ l.label }}
           </RouterLink>
         </nav>
@@ -189,37 +211,55 @@ const chromeless = computed(() => route.meta.public === true || !auth.isLoggedIn
   font-size: var(--text-sm);
 }
 
-/* ---- 资料库（工具入口，弱化） ---- */
+/* ---- 资料库（图标分段按钮） ---- */
 .lib-nav {
   margin-left: auto;
   display: flex;
   align-items: center;
-  gap: var(--space-3);
-  padding: var(--space-1) var(--space-3);
+  gap: var(--space-2);
+}
+.lib-btn {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-height: 34px;
+  padding: 4px 12px 4px 6px;
+  border-radius: var(--radius-md);
   border: 1px solid var(--color-border);
-  border-radius: 999px;
   background: var(--color-surface);
-}.lib-nav--active {
-  border-color: var(--color-border-strong);
-}
-.lib-nav__label {
-  font-size: var(--text-xs);
-  color: var(--color-text-muted);
-  padding-right: var(--space-1);
-  border-right: 1px solid var(--color-border);
-}
-.lib-nav__link {
   color: var(--color-text-secondary);
-  text-decoration: none;
   font-size: var(--text-sm);
-  transition: color 0.15s;
+  font-weight: 500;
+  text-decoration: none;
+  white-space: nowrap;
+  transition: background 0.15s, border-color 0.15s, box-shadow 0.15s, color 0.15s;
 }
-.lib-nav__link:hover {
-  color: var(--color-primary);
+.lib-btn__icon {
+  width: 24px;
+  height: 24px;
+  flex: 0 0 24px;
+  border-radius: var(--radius-sm);
+  display: grid;
+  place-items: center;
+  background: var(--icon-soft);
+  color: var(--icon);
+  transition: filter 0.15s;
 }
-.lib-nav__link.router-link-active {
-  color: var(--color-primary);
+.lib-btn:hover {
+  background: var(--icon-soft);
+  border-color: var(--icon);
+  color: var(--color-text);
+}
+.lib-btn:focus-visible {
+  outline: 2px solid var(--icon);
+  outline-offset: 2px;
+}
+.lib-btn.router-link-active {
+  background: var(--icon-soft);
+  border-color: var(--icon);
+  color: var(--icon);
   font-weight: 600;
+  box-shadow: var(--shadow-sm);
 }
 
 /* ---- 账号状态 ---- */
