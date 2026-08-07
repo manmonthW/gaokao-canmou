@@ -166,18 +166,53 @@ const refYearsText = computed(() =>
       </el-card>
     </template>
 
-    <!-- 空状态引导 -->
+    <!-- 空状态引导：操作流程图 -->
     <el-card v-if="!result || result.error" class="card tip" shadow="never">
       <template #header><div class="card__head"><span>三步完成一份志愿草案</span></div></template>
-      <ol class="tip__list">
-        <li><b>我的定位（当前）：</b>选类别、学科类与目标批次，填入你的<strong>全省位次</strong>，点「定位」。</li>
-        <li><b>智能匹配：</b>系统按位次法给出冲 / 稳 / 保候选，把中意的加入方案。</li>
-        <li><b>决策工作台：</b>整理梯度、体检方案、导出志愿表。</li>
-      </ol>
-      <p class="tip__foot">
-        本工具以 {{ refYearsText }} 已完成录取的数据作为历史参考，服务于 {{ EXAMINEE_YEAR }} 年考生。
-        随时可用右上角「资料库」查院校、查专业、看省控线与一分一段表。
-      </p>
+      <div class="flow">
+        <div class="flow-step">
+          <div class="flow-badge" style="--c: var(--color-primary); --c-soft: var(--color-primary-soft)">
+            <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 21s-7-5.5-9-10a5 5 0 0 1 9-3 5 5 0 0 1 9 3c-2 4.5-9 10-9 10z"/></svg>
+          </div>
+          <div class="flow-body">
+            <div class="flow-step-title">1 · 我的定位（当前）</div>
+            <div class="flow-step-desc">选类别、学科类与目标批次，填入你的<strong>全省位次</strong>，点「定位」。</div>
+          </div>
+        </div>
+
+        <div class="flow-arrow" aria-hidden="true">
+          <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
+        </div>
+
+        <div class="flow-step">
+          <div class="flow-badge" style="--c: var(--color-reach); --c-soft: var(--color-reach-soft)">
+            <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 17l6-6-6-6M12 19h8"/></svg>
+          </div>
+          <div class="flow-body">
+            <div class="flow-step-title">2 · 智能匹配</div>
+            <div class="flow-step-desc">系统按位次法给出冲 / 稳 / 保候选，把中意的加入方案。</div>
+          </div>
+        </div>
+
+        <div class="flow-arrow" aria-hidden="true">
+          <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
+        </div>
+
+        <div class="flow-step">
+          <div class="flow-badge" style="--c: var(--color-match); --c-soft: var(--color-match-soft)">
+            <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 11l3 3L22 4M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>
+          </div>
+          <div class="flow-body">
+            <div class="flow-step-title">3 · 决策工作台</div>
+            <div class="flow-step-desc">整理梯度、体检方案、导出志愿表。</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="flow-foot">
+        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 16v-4M12 8h.01"/></svg>
+        <span>本工具以 <b>{{ refYearsText }}</b> 已完成录取的数据作为历史参考，服务于 <b>{{ EXAMINEE_YEAR }}</b> 年考生。随时可用右上角 <b>「资料库」</b> 查院校、查专业、看省控线与一分一段表。</span>
+      </div>
     </el-card>
   </div>
 </template>
@@ -227,6 +262,71 @@ const refYearsText = computed(() =>
 .line-margin.ahead { color: var(--color-match); }
 .line-margin.behind { color: var(--color-text-muted); }
 .hint { color: var(--color-text-muted); font-size: var(--text-xs); margin: var(--space-3) 0 0; line-height: 1.7; }
-.tip__list { margin: 0; padding-left: var(--space-5); color: var(--color-text-secondary); line-height: 2; }
-.tip__foot { color: var(--color-text-muted); font-size: var(--text-sm); margin: var(--space-3) 0 0; line-height: 1.7; }
+/* 操作流程图 */
+.flow {
+  display: flex;
+  align-items: stretch;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+}
+.flow-step {
+  flex: 1 1 200px;
+  display: flex;
+  gap: var(--space-3);
+  align-items: flex-start;
+  padding: var(--space-4);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  background: var(--color-surface);
+  box-shadow: var(--shadow-sm);
+}
+.flow-badge {
+  flex: 0 0 auto;
+  width: 40px;
+  height: 40px;
+  border-radius: var(--radius-md);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--c);
+  background: var(--c-soft);
+}
+.flow-body { min-width: 0; }
+.flow-step-title {
+  font-size: var(--text-base);
+  font-weight: 600;
+  color: var(--color-text);
+  margin-bottom: var(--space-1);
+}
+.flow-step-desc {
+  font-size: var(--text-sm);
+  color: var(--color-text-secondary);
+  line-height: 1.7;
+}
+.flow-arrow {
+  flex: 0 0 auto;
+  align-self: center;
+  color: var(--color-border-strong);
+  display: flex;
+}
+.flow-foot {
+  display: flex;
+  gap: var(--space-2);
+  align-items: flex-start;
+  margin-top: var(--space-4);
+  padding: var(--space-3) var(--space-4);
+  border-radius: var(--radius-md);
+  background: var(--color-bg);
+  color: var(--color-text-muted);
+  font-size: var(--text-sm);
+  line-height: 1.7;
+}
+.flow-foot svg { flex: 0 0 auto; margin-top: 2px; color: var(--color-primary); }
+.flow-foot b { color: var(--color-text-secondary); }
+
+@media (max-width: 720px) {
+  .flow { flex-direction: column; }
+  .flow-step { flex: 1 1 auto; }
+  .flow-arrow { transform: rotate(90deg); align-self: center; padding: var(--space-1) 0; }
+}
 </style>

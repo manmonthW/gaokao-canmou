@@ -11,6 +11,7 @@
 
 # ============ 数据库备份 dump（含真实录取数据，禁止入库）============
 etl/backups/
+backups/
 
 # ============ Python ============
 __pycache__/
@@ -43,3 +44,4 @@ etl/enrich_review.jsonl
 *.swp
 .idea/
 .vscode/
+.qoder/

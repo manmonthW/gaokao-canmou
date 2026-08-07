@@ -153,7 +153,7 @@ function onRecFilter() { recPage.value = 1; loadRec() }
             <el-option v-for="s in (meta?.subjects || [])" :key="s" :label="s" :value="s" />
           </el-select>
         </div>
-        <el-table :data="lines" size="small" border>
+        <el-table :data="lines" size="small" border fit>
           <el-table-column prop="year" label="年份" width="90" />
           <el-table-column prop="category" label="类别" width="100" />
           <el-table-column prop="subject" label="学科类" width="120" />
@@ -161,7 +161,7 @@ function onRecFilter() { recPage.value = 1; loadRec() }
           <el-table-column prop="score" label="分数" width="100" align="right">
             <template #default="{ row }"><span class="tnum">{{ row.score }}</span></template>
           </el-table-column>
-          <el-table-column prop="note" label="说明" min-width="200" show-overflow-tooltip />
+          <el-table-column prop="note" label="说明" min-width="160" show-overflow-tooltip />
         </el-table>
       </el-tab-pane>
 
@@ -186,7 +186,7 @@ function onRecFilter() { recPage.value = 1; loadRec() }
             class="pg"
           />
         </div>
-        <el-table v-if="rankData" :data="rankData.items" size="small" border>
+        <el-table v-if="rankData" :data="rankData.items" size="small" border fit>
           <el-table-column prop="score" label="分数" width="100">
             <template #default="{ row }">
               <span class="tnum">{{ row.score }}</span>
@@ -234,21 +234,21 @@ function onRecFilter() { recPage.value = 1; loadRec() }
           />
         </div>
         <div v-if="recData && !recData.items.length" class="empty">无匹配记录，请调整筛选条件。</div>
-        <el-table v-if="recData && recData.items.length" :data="recData.items" size="small" border>
+        <el-table v-if="recData && recData.items.length" :data="recData.items" size="small" border fit>
           <el-table-column prop="year" label="年" width="70" />
           <el-table-column prop="category" label="类别" width="90" />
           <el-table-column prop="subject" label="学科类" width="110" />
           <el-table-column prop="batch" label="批次" width="120" />
-          <el-table-column label="征集" width="70" align="center">
+          <el-table-column label="征集" width="60" align="center">
             <template #default="{ row }"><el-tag v-if="row.is_collection" size="small" type="warning" effect="plain">征</el-tag></template>
           </el-table-column>
-          <el-table-column prop="school_name" label="院校" min-width="180" show-overflow-tooltip />
-          <el-table-column prop="major_name" label="专业" min-width="180" show-overflow-tooltip />
-          <el-table-column prop="score_kind" label="类型" width="110" />
-          <el-table-column prop="lowest_score" label="最低分" width="90" align="right">
+          <el-table-column prop="school_name" label="院校" min-width="140" show-overflow-tooltip />
+          <el-table-column prop="major_name" label="专业" min-width="140" show-overflow-tooltip />
+          <el-table-column prop="score_kind" label="类型" width="100" />
+          <el-table-column prop="lowest_score" label="最低分" width="80" align="right">
             <template #default="{ row }"><span class="tnum" v-if="row.lowest_score != null">{{ row.lowest_score }}</span></template>
           </el-table-column>
-          <el-table-column prop="lowest_rank" label="最低位次" width="100" align="right">
+          <el-table-column prop="lowest_rank" label="最低位次" width="90" align="right">
             <template #default="{ row }"><span class="tnum" v-if="row.lowest_rank != null">{{ row.lowest_rank.toLocaleString() }}</span></template>
           </el-table-column>
         </el-table>
@@ -256,7 +256,7 @@ function onRecFilter() { recPage.value = 1; loadRec() }
 
       <!-- 批次发布状态 -->
       <el-tab-pane label="批次发布状态" name="pub">
-        <el-table :data="pubStatus" size="small" border>
+        <el-table :data="pubStatus" size="small" border fit>
           <el-table-column prop="year" label="年份" width="80" />
           <el-table-column prop="category" label="类别" width="90" />
           <el-table-column prop="subject" label="学科类" width="110" />

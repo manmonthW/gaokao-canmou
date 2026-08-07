@@ -42,11 +42,11 @@ const RISK_HINT: Record<RiskLabel, string> = {
   数据不足: '仅参考',
 }
 
-// 风险档（决定 5 个 Tab 与默认展示顺序）：冲 → 保 → 稳 → 高波动 → 数据不足
+// 风险档（决定 5 个 Tab 与默认展示顺序）：冲 → 稳 → 保 → 高波动 → 数据不足
 const RISKS: { key: RiskLabel; label: string; type: string }[] = [
   { key: '冲', label: '冲', type: 'warning' },
-  { key: '保', label: '保', type: 'success' },
   { key: '稳', label: '稳', type: 'primary' },
+  { key: '保', label: '保', type: 'success' },
   { key: '高波动', label: '高波动', type: 'danger' },
   { key: '数据不足', label: '数据不足', type: 'info' },
 ]
