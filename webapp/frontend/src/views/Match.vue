@@ -61,7 +61,25 @@ const filters = ref({
   type: '' as string,
   major_keyword: '' as string,
   has_both_years: false,
+  exclude_flags: [] as string[], // D2a：排除含特殊报考标记的单元
 })
+
+// 再选科目候选（D2b）：3+1+2 模式从四科中选两门
+const ELECTIVES = ['化学', '生物', '政治', '地理']
+function onElectivesChange(v: string[]) {
+  if (v.length > 2) profile.value.electives = v.slice(0, 2)
+}
+
+// 标记文案/颜色：从后端词表（meta.major_flags）取，前端不硬编码
+function flagDef(flag: string) {
+  return (meta.value?.major_flags || []).find((d: any) => d.flag === flag)
+}
+function flagLabel(flag: string) {
+  return flagDef(flag)?.label || flag
+}
+function flagTagType(flag: string) {
+  return flagDef(flag)?.severity === 'warn' ? 'warning' : 'info'
+}
 const page = ref(1)
 const PAGE_SIZE = 30
 
@@ -93,6 +111,10 @@ async function runMatch(resetPage = true) {
       type: filters.value.type || undefined,
       major_keyword: filters.value.major_keyword || undefined,
       has_both_years: filters.value.has_both_years || undefined,
+      exclude_flags: filters.value.exclude_flags.join(',') || undefined,
+      electives: profile.value.electives?.length
+        ? profile.value.electives.join(',')
+        : undefined,
       risk: activeRisk.value,
       page: page.value,
       page_size: PAGE_SIZE,
@@ -141,6 +163,16 @@ function diffClass(d: number | null) {
   if (d > 0) return 'diff--behind'
   return 'diff--flat'
 }
+
+// 批次数据口径提示（D4）：让每条结果知道自己处在什么数据环境下
+const batchContextText = computed(() => {
+  const bc = data.value?.batch_context
+  if (!bc) return ''
+  const pubs = bc.publication
+    .map((p) => `${p.stage}：${p.status}${p.official_published_at ? `（官方发布 ${String(p.official_published_at).slice(0, 10)}）` : ''}`)
+    .join('；')
+  return bc.score_kind_note + (pubs ? ` 本批发布进度：${pubs}` : '')
+})
 
 const expandedRows = ref<Record<string, boolean>>({})
 function rowKey(c: MatchCandidate) {
@@ -203,6 +235,7 @@ onMounted(async () => {
         <span class="profile-bar__seg">{{ profile.category }}</span>
         <span class="profile-bar__seg">{{ profile.subject }}</span>
         <span class="profile-bar__seg">{{ profile.batch || '未选批次' }}</span>
+        <span v-if="profile.electives?.length" class="profile-bar__seg">再选 {{ profile.electives.join('/') }}</span>
         <span class="profile-bar__seg profile-bar__seg--key tnum">位次 {{ profile.rank?.toLocaleString() ?? '未填' }}</span>
         <span class="profile-bar__ref">· 对比历史投档数据</span>
       </div>
@@ -230,6 +263,19 @@ onMounted(async () => {
           <el-form-item label="目标批次">
             <el-select v-model="profile.batch" style="width: 160px" clearable>
               <el-option v-for="b in (meta?.batches || [])" :key="b" :label="b" :value="b" />
+            </el-select>
+          </el-form-item>
+          <el-form-item label="再选科目">
+            <el-select
+              v-model="profile.electives"
+              multiple
+              collapse-tags
+              clearable
+              style="width: 200px"
+              placeholder="选填，最多 2 门"
+              @change="onElectivesChange"
+            >
+              <el-option v-for="s in ELECTIVES" :key="s" :label="s" :value="s" />
             </el-select>
           </el-form-item>
         </div>
@@ -263,6 +309,28 @@ onMounted(async () => {
         </button>
       </div>
 
+      <!-- 批次数据口径（D4）：每条结果所处的发布环境 -->
+      <el-alert
+        v-if="data.batch_context?.warning"
+        type="warning"
+        :title="data.batch_context.warning"
+        show-icon
+        :closable="false"
+        class="card"
+      />
+      <el-alert
+        v-else-if="batchContextText"
+        type="info"
+        :closable="false"
+        class="card ctx-alert"
+      >
+        <template #title>数据口径：{{ data.batch_context?.score_kind }}（不含概率，仅门槛位次比较）</template>
+        {{ batchContextText }}
+      </el-alert>
+      <p v-if="data.excluded_by_subject" class="subj-note">
+        已按再选科目排除 {{ data.excluded_by_subject }} 个不符合选科要求的单元。
+      </p>
+
       <!-- 筛选器 -->
       <el-card class="card" shadow="never">
         <div class="filters wrap">
@@ -283,6 +351,16 @@ onMounted(async () => {
           </el-select>
           <el-input v-model="filters.major_keyword" placeholder="专业名关键词" clearable class="f-q" @keyup.enter="onFilterChange" @clear="onFilterChange" />
           <el-checkbox v-model="filters.has_both_years" @change="onFilterChange">仅两年均有数据</el-checkbox>
+          <el-checkbox-group v-model="filters.exclude_flags" class="flag-excl" @change="onFilterChange">
+            <el-tooltip
+              v-for="d in (meta?.major_flags || [])"
+              :key="d.flag"
+              :content="d.note || d.label"
+              placement="top"
+            >
+              <el-checkbox :value="d.flag">排除{{ d.label }}</el-checkbox>
+            </el-tooltip>
+          </el-checkbox-group>
           <span class="data-ver">数据版本：{{ data.data_version }}</span>
         </div>
       </el-card>
@@ -313,6 +391,14 @@ onMounted(async () => {
             <template #default="{ row }">
               <a v-if="row.catalog_name" class="major-link" @click.stop="openMajor(row.catalog_name)">{{ row.major_name }}</a>
               <span v-else>{{ row.major_name }}</span>
+              <el-tooltip
+                v-for="f in (row.flags || [])"
+                :key="f"
+                :content="flagDef(f)?.note || flagLabel(f)"
+                placement="top"
+              >
+                <el-tag :type="flagTagType(f)" size="small" effect="plain" class="flag-tag">{{ flagLabel(f) }}</el-tag>
+              </el-tooltip>
             </template>
           </el-table-column>
           <el-table-column label="层次/性质/类型" min-width="150">
@@ -478,6 +564,10 @@ onMounted(async () => {
 .risk-dot--danger { background: var(--el-color-danger); }
 .risk-dot--info { background: var(--el-color-info); }
 .pg { display: flex; justify-content: flex-end; margin-top: var(--space-3); }
+.ctx-alert { line-height: 1.7; }
+.subj-note { margin: 0 0 var(--space-3); font-size: var(--text-sm); color: var(--color-text-secondary); }
+.flag-excl { display: inline-flex; flex-wrap: wrap; gap: var(--space-2); }
+.flag-tag { margin-left: 4px; cursor: help; }
 .hint { color: var(--color-text-muted); font-size: var(--text-xs); margin: var(--space-3) 0 0; line-height: 1.7; }
 .dlg-hint { font-size: var(--text-sm); color: var(--color-text-secondary); margin: 0 0 var(--space-2); }
 .plan-list { display: flex; flex-wrap: wrap; gap: var(--space-2); }

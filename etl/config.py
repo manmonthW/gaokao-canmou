@@ -5,6 +5,6 @@ DSN = os.environ.get("GAOKAO_DSN",
                      "postgresql://gaokao:gaokao123@localhost:5432/gaokao")
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-DATA_DIRS = ["2025", "2026"]
+DATA_DIRS = ["2025", "2026", "2027"]
 OCR_LANGS = "chi_sim+eng"
 OCR_DPI = 200

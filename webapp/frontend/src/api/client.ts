@@ -72,10 +72,12 @@ import type {
   AuthResult,
   HotSchoolCategory,
   HotSchool,
+  DataStatusMatrix,
 } from '@/types'
 
 export const api = {
   dataStatus: () => getJson<DataStatusResponse>('/data-status'),
+  dataStatusMatrix: () => getJson<DataStatusMatrix>('/data-status/matrix'),
   meta: () => getJson<MetaResponse>('/meta'),
   locateSummary: (p: Record<string, unknown>) =>
     getJson<LocateSummary>(`/locate/summary${buildQuery(p)}`),

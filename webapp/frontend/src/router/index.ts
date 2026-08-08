@@ -5,6 +5,7 @@ import MajorSearch from '@/views/MajorSearch.vue'
 import SchoolDetail from '@/views/SchoolDetail.vue'
 import SchoolMajorDetail from '@/views/SchoolMajorDetail.vue'
 import DataCenter from '@/views/DataCenter.vue'
+import Eligibility from '@/views/Eligibility.vue'
 import Match from '@/views/Match.vue'
 import Workbench from '@/views/Workbench.vue'
 import Auth from '@/views/Auth.vue'
@@ -19,6 +20,7 @@ const routes = [
   { path: '/match', name: 'match', component: Match },
   { path: '/workbench', name: 'workbench', component: Workbench },
   { path: '/datacenter', name: 'datacenter', component: DataCenter },
+  { path: '/eligibility', name: 'eligibility', component: Eligibility },
 ]
 
 const router = createRouter({

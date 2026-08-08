@@ -18,6 +18,7 @@ const defaultProfile: ExamineeProfile = {
   batch: '本科批',
   score: null,
   rank: null,
+  electives: [],
 }
 
 function load(): ExamineeProfile {
@@ -25,7 +26,9 @@ function load(): ExamineeProfile {
     const raw = localStorage.getItem(STORAGE_KEY)
     if (!raw) return { ...defaultProfile }
     // 强制 year 为 EXAMINEE_YEAR：历史存档里可能残留 2025/2026
-    return { ...defaultProfile, ...JSON.parse(raw), year: EXAMINEE_YEAR }
+    const p = { ...defaultProfile, ...JSON.parse(raw), year: EXAMINEE_YEAR }
+    if (!Array.isArray(p.electives)) p.electives = []
+    return p
   } catch {
     return { ...defaultProfile }
   }

@@ -35,6 +35,9 @@ async def get_meta():
     types = await db.fetch_all(
         "SELECT DISTINCT type FROM school_profiles "
         "WHERE type IS NOT NULL ORDER BY type")
+    # 专业级报考标记词表（D2a，migration 0011）：前端筛选与文案统一来源
+    major_flag_rows = await db.fetch_all(
+        "SELECT flag, label, severity, note FROM flag_dictionary ORDER BY flag")
 
     # 组装科类→批次映射
     batches_by_category: dict[str, list[str]] = {}
@@ -53,4 +56,8 @@ async def get_meta():
         "natures": [r[0] for r in natures],
         "types": [r[0] for r in types],
         "flags": ["985", "211", "双一流"],
+        "major_flags": [
+            {"flag": r[0], "label": r[1], "severity": r[2], "note": r[3]}
+            for r in major_flag_rows
+        ],
     }

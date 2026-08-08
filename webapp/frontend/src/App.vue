@@ -73,6 +73,12 @@ const library = [
     icon: 'chart',
     style: '--icon: var(--color-match); --icon-soft: var(--color-match-soft)',
   },
+  {
+    to: '/eligibility',
+    label: '资格自查',
+    icon: 'check',
+    style: '--icon: var(--el-color-warning); --icon-soft: var(--el-color-warning-light-8)',
+  },
 ]
 // 登录页等公开页不显示应用外壳（顶栏 + 步骤条）
 const chromeless = computed(() => route.meta.public === true || !auth.isLoggedIn.value)
@@ -103,7 +109,9 @@ const chromeless = computed(() => route.meta.public === true || !auth.isLoggedIn
               <!-- 专业：翻开的书 -->
               <svg v-else-if="l.icon === 'book'" viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 4h6a4 4 0 0 1 4 4v13a3 3 0 0 0-3-3H2z"/><path d="M22 4h-6a4 4 0 0 0-4 4v13a3 3 0 0 1 3-3h7z"/></svg>
               <!-- 数据：柱状图 -->
-              <svg v-else viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v18h18"/><path d="M18 17V9M13 17V5M8 17v-3"/></svg>
+              <svg v-else-if="l.icon === 'chart'" viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v18h18"/><path d="M18 17V9M13 17V5M8 17v-3"/></svg>
+              <!-- 资格：带勾清单 -->
+              <svg v-else viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="3" width="16" height="18" rx="2"/><path d="m8 12 3 3 5-6"/></svg>
             </span>
             {{ l.label }}
           </RouterLink>

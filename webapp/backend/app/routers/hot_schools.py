@@ -75,11 +75,13 @@ def parse_ranking(raw):
 
 
 # 图片根目录（与 OCR 入库脚本一致），用于图片端点路径白名单
-# __file__ = .../webapp/backend/app/routers/hot_schools.py
-# 项目根 = .../gaokao/ln （从 backend 向上两级）
-_IMAGE_ROOT = os.path.join(
-    os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))),
-    "2026allmaterial", "热门大学介绍",
+# Docker 部署时通过 HOT_IMAGE_ROOT 环境变量覆盖，避免容器内路径计算偏差。
+_IMAGE_ROOT = os.environ.get(
+    "HOT_IMAGE_ROOT",
+    os.path.join(
+        os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))),
+        "2026allmaterial", "热门大学介绍",
+    ),
 )
 
 # 卡片信息字段（不含 image_path 原文，单独走 image 端点）

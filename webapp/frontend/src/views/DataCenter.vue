@@ -2,6 +2,7 @@
 import { ref, onMounted, watch, computed } from 'vue'
 import { useRoute } from 'vue-router'
 import { api } from '@/api/client'
+import type { DataStatusMatrix } from '@/types'
 
 const route = useRoute()
 const meta = ref<any>(null)
@@ -34,6 +35,9 @@ const recPage = ref(1)
 
 // 批次发布状态
 const pubStatus = ref<any[]>([])
+
+// 发布矩阵（D4）：官方发布状态 × 库内记录数，暴露时效性缺口
+const matrix = ref<DataStatusMatrix | null>(null)
 
 async function guard(fn: () => Promise<void>) {
   loading.value = true
@@ -85,12 +89,16 @@ function loadRec() {
 function loadPub() {
   return guard(async () => { pubStatus.value = await api.publicationStatus() })
 }
+function loadMatrix() {
+  return guard(async () => { matrix.value = await api.dataStatusMatrix() })
+}
 
 function onTab(tab: string) {
   if (tab === 'lines' && !lines.value.length) loadLines()
   if (tab === 'rank' && !rankData.value) loadRank()
   if (tab === 'records') loadRec()
   if (tab === 'pub' && !pubStatus.value.length) loadPub()
+  if (tab === 'matrix' && !matrix.value) loadMatrix()
 }
 
 // 原始记录：批次下拉按已选科类联动（数据驱动，来自 meta.batches_by_category）。
@@ -275,6 +283,57 @@ function onRecFilter() { recPage.value = 1; loadRec() }
           <el-table-column prop="note" label="备注" min-width="160" show-overflow-tooltip />
         </el-table>
       </el-tab-pane>
+
+      <!-- 发布矩阵（D4）：官方发布 × 库内记录，缺口一目了然 -->
+      <el-tab-pane label="发布矩阵" name="matrix">
+        <p class="matrix-note">
+          每个批次的官方发布状态与库内已入库记录数对照：
+          <el-tag type="danger" size="small" effect="light">缺口</el-tag>
+          表示官方已发布/部分发布但库内尚无数据，结果可能不完整。
+        </p>
+        <el-table
+          v-if="matrix"
+          :data="matrix.matrix"
+          size="small"
+          border
+          fit
+          :row-class-name="(r: any) => (r.row.gap ? 'matrix-gap' : '')"
+        >
+          <el-table-column prop="year" label="年份" width="80" />
+          <el-table-column prop="category" label="类别" width="90" />
+          <el-table-column prop="subject" label="学科类" width="110" />
+          <el-table-column prop="batch" label="批次" width="130" />
+          <el-table-column prop="stage" label="阶段" width="80" />
+          <el-table-column label="发布状态" width="100">
+            <template #default="{ row }">
+              <el-tag
+                :type="row.status === '已完成' ? 'success' : row.status === '待发布' ? 'warning' : 'info'"
+                effect="light"
+              >{{ row.status }}</el-tag>
+            </template>
+          </el-table-column>
+          <el-table-column prop="official_published_at" label="官方发布" width="170" />
+          <el-table-column label="库内记录" width="100" align="right">
+            <template #default="{ row }">
+              <span class="tnum">{{ row.records.toLocaleString() }}</span>
+              <el-tag v-if="row.gap" type="danger" size="small" effect="light">缺口</el-tag>
+            </template>
+          </el-table-column>
+          <el-table-column prop="note" label="备注" min-width="160" show-overflow-tooltip />
+        </el-table>
+        <template v-if="matrix?.unregistered.length">
+          <h3 class="matrix-sub">库内有数据但未登记发布状态的批次（登记遗漏）</h3>
+          <el-table :data="matrix.unregistered" size="small" border fit>
+            <el-table-column prop="year" label="年份" width="80" />
+            <el-table-column prop="category" label="类别" width="90" />
+            <el-table-column prop="subject" label="学科类" width="110" />
+            <el-table-column prop="batch" label="批次" width="130" />
+            <el-table-column prop="records" label="库内记录" width="100" align="right">
+              <template #default="{ row }"><span class="tnum">{{ row.records.toLocaleString() }}</span></template>
+            </el-table-column>
+          </el-table>
+        </template>
+      </el-tab-pane>
     </el-tabs>
   </div>
 </template>
@@ -291,5 +350,8 @@ function onRecFilter() { recPage.value = 1; loadRec() }
 .f-q { width: 160px; }
 .pg { margin-left: auto; }
 .tabs :deep(.el-tabs__content) { padding-top: var(--space-2); }
+.matrix-note { color: var(--color-text-secondary); font-size: var(--text-sm); margin: 0 0 var(--space-3); }
+.matrix-sub { margin: var(--space-5) 0 var(--space-2); font-size: var(--text-base); }
+:deep(.matrix-gap) td { background: var(--el-color-danger-light-9) !important; }
 .empty { padding: var(--space-8); text-align: center; color: var(--color-text-muted); }
 </style>

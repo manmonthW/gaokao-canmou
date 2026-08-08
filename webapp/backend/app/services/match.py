@@ -33,6 +33,38 @@ MATCH_CONFIG = {
 
 RISK_ORDER = ["保", "稳", "冲", "高波动", "数据不足"]
 
+# 再选科目全集（选科要求校验用，D2b）
+_SUBJECTS = ["物理", "化学", "生物", "政治", "历史", "地理"]
+
+
+def _first_choice(subject: str):
+    """学科类 → 首选科目。"""
+    if subject and "物理" in subject:
+        return "物理"
+    if subject and "历史" in subject:
+        return "历史"
+    return None
+
+
+def _first_req_ok(first_req, subject):
+    fc = _first_choice(subject)
+    if not first_req or "不限" in first_req or "均可" in first_req:
+        return True
+    return bool(fc and fc in first_req)
+
+
+def _re_req_ok(re_req, electives):
+    """启发式校验再选要求（官方表头确定前的保守实现）：
+    空/不限 → 通过；含「选 1/或」→ 任一命中；否则需全部命中。"""
+    if not re_req or "不限" in re_req:
+        return True
+    tokens = [s for s in _SUBJECTS if s in re_req]
+    if not tokens:
+        return True
+    if "选1" in re_req.replace(" ", "") or "或" in re_req:
+        return any(t in electives for t in tokens)
+    return all(t in electives for t in tokens)
+
 
 async def get_data_version() -> Optional[str]:
     rel = await db.fetch_one(
@@ -107,6 +139,7 @@ def _build_candidate(unit: dict, R: int, cfg: dict):
         "level": unit["level"],
         "nature": unit["nature"],
         "type": unit["type"],
+        "flags": unit["flags"],
         "n_years": unit["n_years"],
         "has_both_years": unit["has_both_years"],
         "best_rank": unit["best_rank"],
@@ -144,6 +177,8 @@ async def match(
     major_keyword: Optional[str] = None,
     has_both_years: Optional[bool] = None,
     risk: Optional[str] = None,
+    exclude_flags: Optional[list] = None,
+    electives: Optional[list] = None,
     page: int = 1,
     page_size: int = 30,
     cfg: Optional[dict] = None,
@@ -175,7 +210,7 @@ async def match(
     # 按 roadmap 要求降级为「分数参考」并显式标注，而非直接丢弃。
     rows = await db.fetch_all(
         """SELECT a.year, a.school_code, a.school_name, a.major_code, a.major_name,
-                  a.batch, a.lowest_rank, a.lowest_score,
+                  a.batch, a.lowest_rank, a.lowest_score, a.flags,
                   p.province, p.city, p.level, p.nature, p.type
            FROM admission_scores a
            LEFT JOIN school_profiles p ON a.school_code = p.code
@@ -189,7 +224,7 @@ async def match(
     # ---------- 第三步：构造候选单元 ----------
     units: dict = {}
     for (
-        y, sc, sn, mc, mn, bt, lr, lscore,
+        y, sc, sn, mc, mn, bt, lr, lscore, fl,
         prov, cty, lvl, nat, typ,
     ) in rows:
         key = _build_unit_key(sc, mc, mn, bt)
@@ -201,8 +236,10 @@ async def match(
                 "province": prov, "city": cty, "level": lvl,
                 "nature": nat, "type": typ,
                 "years": [], "ranks": [], "yearly": [], "scores": {},
+                "flags": set(),
             }
             units[key] = u
+        u["flags"] |= set(fl or [])
         u["years"].append(y)
         if lscore is not None:
             u["scores"][y] = lscore
@@ -233,6 +270,7 @@ async def match(
         u["last_year"] = max_y
         u["last_year_rank"] = next((r for y, r in u["yearly"] if y == max_y), None)
         u["last_year_score"] = u["scores"].get(max_y)
+        u["flags"] = sorted(u["flags"])
         u["yearly"].sort(key=lambda t: t[0])
 
     # ---------- 第四步（补充）：批量关联标准专业名 ----------
@@ -259,8 +297,47 @@ async def match(
     # ---------- 第四步之后：构造候选 ----------
     candidates = [_build_candidate(u, rank, cfg) for u in units.values()]
 
-    # 应用偏好筛选（省/市/层次/性质/类型/专业关键词/两年均有）
+    # ---------- 选科资格校验（D2b）：仅当该年选科要求已入库时启用 ----------
+    excluded_by_subject = 0
+    subjreq_loaded = False
+    if electives:
+        cnt = await db.fetch_one(
+            "SELECT count(*) FROM subject_requirements WHERE year=%s", (year,))
+        if cnt and cnt[0] > 0:
+            subjreq_loaded = True
+            req_rows = await db.fetch_all(
+                """SELECT school_code, school_name, major_name, first_req, re_req
+                   FROM subject_requirements WHERE year=%s""", (year,))
+            # (school_code, major_name) 级优先；major_name 为空的行视为院校级兑底
+            req_by_unit, req_by_school = {}, {}
+            for sc, sn, mn, fr, rr in req_rows:
+                if mn:
+                    req_by_unit[(sc, mn)] = (fr, rr)
+                else:
+                    req_by_school.setdefault(sc, []).append((fr, rr))
+            kept = []
+            for c in candidates:
+                req = req_by_unit.get((c["school_code"], c["major_name"]))
+                reqs = [req] if req else req_by_school.get(c["school_code"], [])
+                if not reqs:
+                    # 无记录：不默认「可报」，显式标注未核验
+                    c["subject_unverified"] = True
+                    w = "选科要求未收录，请自行核对官方选科要求。"
+                    c["warning"] = f"{c['warning']} {w}" if c["warning"] else w
+                    kept.append(c)
+                    continue
+                ok = any(_first_req_ok(fr, subject) and _re_req_ok(rr, electives)
+                         for fr, rr in reqs)
+                if ok:
+                    kept.append(c)
+                else:
+                    excluded_by_subject += 1
+            candidates = kept
+
+    # 应用偏好筛选（省/市/层次/性质/类型/专业关键词/两年均有/排除标记）
     def keep(c):
+        if exclude_flags and set(exclude_flags) & set(c["flags"]):
+            return False
         if province and c["province"] != province:
             return False
         if city and c["city"] != city:
@@ -322,13 +399,43 @@ async def match(
     facets = {k: sorted(v.items(), key=lambda kv: -kv[1]) for k, v in facets.items()}
 
     version = await get_data_version()
+
+    # ---------- 批次发布状态上下文（D4）：让每条结果知道自己处在什么数据环境下 ----------
+    pub = await db.fetch_all(
+        """SELECT stage, status, note, official_published_at
+           FROM admission_publication_status
+           WHERE year=%s AND category=%s AND subject=%s AND batch=%s
+           ORDER BY stage""",
+        (year, category, subject, batch),
+    )
+    batch_context = {
+        "batch": batch,
+        "score_kind": "投档最低分",
+        "score_kind_note": (
+            "结果按「投档最低分」（进档门槛位次）统计。辽宁普通批以投档线发布为主，"
+            "「录取最低分」仅提前批等批次发布；且「专业+学校」志愿无校内专业调剂，"
+            "投档线与录取线差距小，可直接作为门槛参考。"),
+        "publication": [
+            {"stage": r[0], "status": r[1], "note": r[2],
+             "official_published_at": str(r[3]) if r[3] else None}
+            for r in pub
+        ],
+    }
+    if not pub:
+        batch_context["warning"] = (
+            "该批次未登记发布状态，以上历史数据可能不完整，请结合省招考办官方公告核实。")
+
     return {
         "data_version": version,
         "examinee": {
             "year": year, "category": category, "subject": subject,
             "batch": batch, "score": score, "rank": rank,
+            "electives": electives,
         },
         "totals": totals,
+        "excluded_by_subject": excluded_by_subject,
+        "subject_requirements_loaded": subjreq_loaded,
+        "batch_context": batch_context,
         "facets": {k: [{"value": v, "count": c} for v, c in lst] for k, lst in facets.items()},
         "page": page,
         "page_size": page_size,

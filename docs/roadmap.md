@@ -13,7 +13,7 @@
 | 1 | 只读查询基础（数据中心 + 检索 + 详情 + 城市透视） | 用户可查全部已发布历史并看到来源 | ✅ 已完成 |
 | 2 | 普通类智能匹配 MVP（核心闭环） | 分数+位次 → 定位 + 冲稳保候选，每项可解释 | ✅ 已完成 |
 | 3 | 决策工作台（志愿草案 = 可填志愿表） | 用户独立完成 候选→方案 全流程 | ✅ 已完成 |
-| 4 | 数据增强 | 补录 / 招生计划 / 选科要求 / 专业标准库 | ⬜ 待开始 |
+| 4 | 数据增强 | 补录 / 招生计划 / 选科要求 / 专业标准库 | 🔄 部分完成（D2–D5，见下） |
 | 5 | 艺术体育 & 智能解释 | 艺术体育独立模型 + AI 数据解释 | ⬜ 待开始 |
 
 ---
@@ -73,11 +73,11 @@
 - **方案分享（可选，待确认是否开放）**。
 
 ### Phase 4 — 数据增强
-- 补 2023/2024 录取。
-- 招生计划（人数/学制/学费/校区/选科要求/体检限制）。
-- 专业标准库 `majors`。
-- 中外合作/定向/专项标签。
-- 使系统从「历史匹配」升级为「资格过滤 + 历史匹配」。
+- 补 2023/2024 录取。⬜ 待开始（第一性评审 D1 定为最高优先）
+- 招生计划（人数/学制/学费/校区/选科要求/体检限制）。⬜ 待开始
+- 专业标准库 `majors`。⬜ 待开始
+- 中外合作/定向/专项标签。✅ **已完成（2026-08-08，D2a）**：`flags` 列 + `flag_dictionary` 词表，1,595 行打标，详见 `docs/changelog-2026-08-08-d2-d5.md`
+- 使系统从「历史匹配」升级为「资格过滤 + 历史匹配」。🔄 **基础设施已就绪**：选科要求表（0012）+ 匹配硬过滤门禁 + 资格自查页已落地；待 2027 官方选科要求入库后自动生效
 
 ### Phase 5 — 艺术体育 & 智能解释
 - 艺术（按专业类别 + 专业分 + 综合分规则）、体育独立模型。
@@ -177,6 +177,18 @@
 
 方案分享（roadmap 中标注「可选，待确认」）未实现，待确认是否开放。
 
+### 🔄 Phase 4 部分落地 — D2–D5 数据层实施（2026-08-08）
+
+落实 `first-principles-review.md` §5.1 建议，完整记录见 **`docs/changelog-2026-08-08-d2-d5.md`**：
+
+- **D2a 专业级标记**：迁移 0011（`flags TEXT[]` + GIN + `flag_dictionary` 词表）；`etl/load_major_flags.py` 幂等打标 1,595 行（中外合作 1,351 / 少数民族预科 111 / 异地校区 74 / 定向 67 / 民族班 29）；match 支持 `exclude_flags` 过滤；前端徽标 + 资格自查页（`/eligibility`）。
+- **D2b 选科要求**：迁移 0012（`subject_requirements`）；`etl/load_subject_requirements.py` 骨架就绪；匹配侧硬过滤门禁已实现（仅当对应年份数据入库后启用，未收录专业给 `subject_unverified` 警告，永不默认「可报」）。
+- **D3 口径审计**：`etl/audit_score_kind.py` 证实录取最低分仅 448 行且全在提前批 → 采用叙述方案（`batch_context.score_kind_note` + 导出免责声明），不做数据回填。
+- **D4 发布矩阵**：`GET /api/v1/data-status/matrix`（批次×年份×科类，缺口高亮）；match 响应携带 `batch_context`（口径 + 发布进度 + 未登记批次警告）；数据中心新增「发布矩阵」标签页。
+- **D5 发布流水线**：`etl/publish_release.py`（check → prepare → publish → rollback，prepare 自动跑 backfill + verify_all）。
+
+验证：match 冒烟（2026 物理学科类本科批 位次 12000）total 15,570，标记与 batch_context 输出正确；后端 py_compile 全过；本地部署 :5173/:8000 联调通过。
+
 ---
 
 ## 五、环境运行方式
@@ -204,9 +216,14 @@ psql -U gaokao    -h localhost -d gaokao -f backend/migrations/0001_phase0_table
 psql -U gaokao    -h localhost -d gaokao -f backend/migrations/0002_seed.sql
 psql -U gaokao    -h localhost -d gaokao -f backend/migrations/0003_grants.sql
 psql -U gaokao    -h localhost -d gaokao -f backend/migrations/0004_indexes.sql
+# 0005–0010 见 migrations/ 目录（按编号顺序执行）
+psql -U gaokao    -h localhost -d gaokao -f backend/migrations/0011_major_flags.sql
+psql -U gaokao    -h localhost -d gaokao -f backend/migrations/0012_subject_requirements.sql
 ```
+
+> 下一个迁移编号：**0013**。schema 变更纪律与后续开发注意事项见 `docs/changelog-2026-08-08-d2-d5.md` §六。
 
 ---
 
 ## 六、下一步建议
-进入 **Phase 2（普通类智能匹配 MVP）**：先落地考生档案与 `/api/match` 六步，配套结果页与回测脚本，完成后即可形成「输入分数+位次 → 冲稳保候选」核心闭环。
+按第一性评审优先级：**D1 补 2023/2024 录取数据**（分档可信化先决条件）→ A1 判定区间化与回测结论回灌（`backtest_match.py` 的 margin_sensitivity）→ P1 双模式（备考期位次区间 + 线差法估位）。2027 官方选科要求发布后运行 `load_subject_requirements.py` 即自动启用硬过滤。

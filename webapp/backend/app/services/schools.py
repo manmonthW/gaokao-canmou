@@ -35,11 +35,16 @@ async def get_school(code: str):
            GROUP BY year, category, subject
            ORDER BY year DESC, category, subject""", (code,))
     majors = await db.fetch_all(
-        """SELECT major_name, major_code,
-                  count(DISTINCT year) AS years,
-                  max(year) AS last_year, count(*) AS recs
-           FROM admission_scores WHERE school_code=%s
-           GROUP BY major_name, major_code
+        """SELECT a.major_name, a.major_code,
+                  count(DISTINCT a.year) AS years,
+                  max(a.year) AS last_year, count(*) AS recs,
+                  COALESCE((SELECT array_agg(DISTINCT x ORDER BY x)
+                            FROM admission_scores b, unnest(b.flags) x
+                            WHERE b.school_code = a.school_code
+                              AND b.major_name = a.major_name
+                              AND b.flags <> '{}'), '{}') AS flags
+           FROM admission_scores a WHERE a.school_code=%s
+           GROUP BY a.school_code, a.major_name, a.major_code
         ORDER BY years DESC, major_name ASC
         LIMIT 300""", (code,))
 
@@ -63,7 +68,7 @@ async def get_school(code: str):
         ],
         "majors": [
             {"major_name": r[0], "major_code": r[1], "years": r[2],
-             "last_year": r[3], "records": r[4]}
+             "last_year": r[3], "records": r[4], "flags": list(r[5] or [])}
             for r in majors
         ],
     }

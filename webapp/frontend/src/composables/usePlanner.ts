@@ -105,6 +105,7 @@ export function toSnapshot(
     last_year_score: c.last_year_score ?? null,
     rank_diff_last: c.rank_diff_last,
     yearly: c.yearly,
+    flags: c.flags ?? [],
     data_version: dataVersion,
     examinee_rank: examineeRank,
     saved_at: new Date().toISOString().slice(0, 19).replace('T', ' '),
@@ -210,12 +211,14 @@ export function usePlanner() {
     const seen = new Map<string, number>()
     let missing = 0
     let versionMismatch = 0
+    const flagged: string[] = []
     for (const e of p.entries) {
       counts[e.risk] = (counts[e.risk] || 0) + 1
       const key = `${e.school_code}|${e.major_code || e.major_name}`
       seen.set(key, (seen.get(key) || 0) + 1)
       if (e.last_year_rank == null) missing++
       if (p.data_version && e.data_version && e.data_version !== p.data_version) versionMismatch++
+      if (e.flags && e.flags.length) flagged.push(`${e.school_name}·${e.major_name}（${e.flags.join('、')}）`)
     }
     const dup = [...seen.values()].filter((n) => n > 1).length
     const total = p.entries.length
@@ -237,6 +240,9 @@ export function usePlanner() {
     if (missing > 0) problems.push(`${missing} 个志愿缺少最低位次数据（仅分数参考），判定可靠性有限。`)
     if (dup > 0) problems.push(`存在 ${dup} 组重复的「院校+专业」，请检查是否误加。`)
     if (versionMismatch > 0) problems.push(`${versionMismatch} 个志愿的数据版本与方案创建时不一致，建议重新匹配后确认。`)
+    if (flagged.length > 0) problems.push(
+      `${flagged.length} 个志愿含特殊报考标记，需逐项核实学费/协议/报考条件后再保留：` +
+      flagged.slice(0, 5).join('；') + (flagged.length > 5 ? ` 等 ${flagged.length} 项` : '') + '。')
     if (total > 112) problems.push('志愿数超过辽宁本科批 112 个上限。')
     const ok = problems.length === 0
     const warnings = ok ? ['梯度结构良好：冲稳保配置合理，无重复与数据缺失。'] : problems

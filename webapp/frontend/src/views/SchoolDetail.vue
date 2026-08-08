@@ -115,6 +115,7 @@ watch(() => route.params.code, (c) => { code.value = c as string; load() })
             @click="openMajor(m.major_name)"
           >
             {{ m.major_name }} <span class="majors__dim">（{{ m.years }}年 · {{ m.records }}条）</span>
+            <span v-if="m.flags?.length" class="majors__flag" :title="m.flags.join('、')">⚑ {{ m.flags.join('/') }}</span>
           </el-tag>
         </div>
         <p class="hint" v-if="data.majors.length >= 300">仅显示前 300 个专业，可在数据中心按专业名检索全部记录。</p>
@@ -137,6 +138,7 @@ watch(() => route.params.code, (c) => { code.value = c as string; load() })
 .majors { display: flex; flex-wrap: wrap; gap: var(--space-2); }
 .majors__tag { cursor: pointer; }
 .majors__dim { color: var(--color-text-muted); font-size: var(--text-xs); }
+.majors__flag { color: var(--el-color-warning); font-size: var(--text-xs); margin-left: 4px; }
 .hint { color: var(--color-text-muted); font-size: var(--text-xs); margin: var(--space-2) 0 0; }
 .intro { margin: var(--space-4) 0 0; padding: var(--space-3) var(--space-4); background: var(--color-bg-subtle, #f7f9fc); border-radius: var(--radius-md); font-size: var(--text-sm); line-height: 1.8; color: var(--color-text-secondary); }
 .empty { padding: var(--space-8); text-align: center; color: var(--color-text-muted); }

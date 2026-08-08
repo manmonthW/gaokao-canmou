@@ -114,7 +114,7 @@ async function exportPlan(p: VolunteerPlan) {
         major_code: e.major_code, major_name: e.major_name,
         last_year: e.last_year, last_year_score: e.last_year_score,
         last_year_rank: e.last_year_rank, rank_diff_last: e.rank_diff_last,
-        level: e.level, city: e.city, note: e.note,
+        level: e.level, city: e.city, flags: e.flags || [], note: e.note,
       })),
     })
     const url = URL.createObjectURL(blob)

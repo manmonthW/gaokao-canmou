@@ -49,3 +49,4 @@ class MetaResponse(BaseModel):
     natures: List[str] = []
     types: List[str] = []
     flags: List[str] = []
+    major_flags: List[dict] = []

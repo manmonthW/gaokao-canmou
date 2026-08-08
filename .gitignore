@@ -38,6 +38,7 @@ etl/data/*.xlsx
 # ETL 运行日志
 etl/enrich_log.jsonl
 etl/enrich_review.jsonl
+*.log
 
 # ============ 系统/编辑器 ============
 .DS_Store

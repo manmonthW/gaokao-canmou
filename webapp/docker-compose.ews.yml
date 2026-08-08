@@ -1,0 +1,70 @@
+name: gaokao-ln
+
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: gaokao-ln-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: gaokao
+      POSTGRES_USER: gaokao
+      POSTGRES_PASSWORD: gaokao123
+    volumes:
+      - gaokao_ln_db_data:/var/lib/postgresql/data
+      - ../backups/gaokao_backup_20260807_162352.sql:/docker-entrypoint-initdb.d/01-seed.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U gaokao -d gaokao"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+
+  backend:
+    build:
+      context: ./backend
+    container_name: gaokao-ln-backend
+    restart: unless-stopped
+    environment:
+      GAOKAO_DSN: postgresql://gaokao:gaokao123@db:5432/gaokao
+      CORS_ORIGINS: "*"
+      MAX_PAGE_SIZE: "500"
+      JWT_SECRET: "replace-this-in-production"
+      JWT_EXPIRE_HOURS: "168"
+      USER_DB_PATH: /app/data/users.db
+      HOT_IMAGE_ROOT: /home/ekewang/projects/gaokao/ln/2026allmaterial/热门大学介绍
+    depends_on:
+      db:
+        condition: service_healthy
+    volumes:
+      - backend_user_data:/app/data
+      - ../2026allmaterial:/home/ekewang/projects/gaokao/ln/2026allmaterial:ro
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "python -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=3).read()\"",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+
+  frontend:
+    build:
+      context: ./frontend
+      args:
+        VITE_API_BASE: ""
+    container_name: gaokao-ln-frontend
+    restart: unless-stopped
+    depends_on:
+      backend:
+        condition: service_healthy
+    ports:
+      - "985:80"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1/health >/dev/null"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+
+volumes:
+  gaokao_ln_db_data:
+  backend_user_data:

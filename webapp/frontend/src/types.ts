@@ -46,6 +46,15 @@ export interface MetaResponse {
   natures: string[]
   types: string[]
   flags: string[]
+  major_flags: MajorFlagDef[]
+}
+
+/** 专业级报考标记词表（D2a）：后端 flag_dictionary */
+export interface MajorFlagDef {
+  flag: string
+  label: string
+  severity: 'notice' | 'warn' | 'block'
+  note: string | null
 }
 
 // ------------------------------ 定位服务 ------------------------------
@@ -391,6 +400,8 @@ export interface MatchCandidate {
   risk_reason: string
   rank_diff_last: number | null
   warning: string | null
+  flags: string[]
+  subject_unverified?: boolean
   yearly: MatchYearly[]
 }
 
@@ -415,6 +426,21 @@ export interface MatchExaminee {
   batch: string
   score: number | null
   rank: number | null
+  electives?: string[] | null
+}
+
+/** 批次发布状态上下文（D4）：告诉用户本批数据的口径与发布进度 */
+export interface BatchContext {
+  batch: string
+  score_kind: string
+  score_kind_note: string
+  publication: {
+    stage: string
+    status: string
+    note: string | null
+    official_published_at: string | null
+  }[]
+  warning?: string
 }
 
 export interface MatchResponse {
@@ -431,6 +457,9 @@ export interface MatchResponse {
   page: number
   page_size: number
   items: MatchCandidate[]
+  batch_context?: BatchContext
+  excluded_by_subject?: number
+  subject_requirements_loaded?: boolean
   error?: string
 }
 
@@ -441,6 +470,8 @@ export interface ExamineeProfile {
   batch: string
   score: number | null
   rank: number | null
+  /** 再选科目（D2b，可选）：如 ['化学','生物']；2027 选科要求入库后参与资格校验 */
+  electives?: string[]
 }
 
 // ------------------------------ 认证 ------------------------------
@@ -485,6 +516,7 @@ export interface CandidateSnapshot {
   last_year_score: number | null
   rank_diff_last: number | null
   yearly: MatchYearly[]
+  flags?: string[]
   data_version: string | null
   examinee_rank: number | null
   saved_at: string
@@ -530,4 +562,23 @@ export interface HotSchool {
   honors: string | null
   faculty: string | null
   has_image: boolean
+}
+
+// ------------------------------ 发布状态矩阵（D4） ------------------------------
+export interface MatrixRow {
+  year: number
+  category: string
+  subject: string
+  batch: string
+  stage: string
+  status: string
+  note: string | null
+  official_published_at: string | null
+  records: number
+  gap: boolean
+}
+
+export interface DataStatusMatrix {
+  matrix: MatrixRow[]
+  unregistered: { year: number; category: string; subject: string; batch: string; records: number }[]
 }

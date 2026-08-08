@@ -18,9 +18,9 @@ from openpyxl.utils import get_column_letter
 
 HEADERS = [
     "序号", "档位", "院校代码", "院校名称", "专业代码", "专业名称",
-    "往年最低分", "往年最低位次", "位次差", "层次", "城市", "备注",
+    "报考标记", "往年最低分", "往年最低位次", "位次差", "层次", "城市", "备注",
 ]
-COL_WIDTHS = [6, 8, 10, 26, 10, 30, 11, 12, 14, 10, 12, 24]
+COL_WIDTHS = [6, 8, 10, 26, 10, 30, 16, 11, 12, 14, 10, 12, 24]
 
 RISK_FILL = {
     "冲": "FDE9D9",   # 橙
@@ -110,6 +110,7 @@ def build_plan_xlsx(payload: dict) -> bytes:
             it.get("school_name"),
             it.get("major_code") or "—",
             it.get("major_name"),
+            "、".join(it.get("flags") or []) or "—",
             it.get("last_year_score") if it.get("last_year_score") is not None else "—",
             it.get("last_year_rank") if it.get("last_year_rank") is not None else "—",
             _diff_text(it.get("rank_diff_last")),
@@ -122,7 +123,7 @@ def build_plan_xlsx(payload: dict) -> bytes:
             cell = ws.cell(row=r, column=j, value=v)
             cell.font = Font(size=10)
             cell.border = _border
-            if j in (1, 2, 3, 5, 7, 8, 9, 10, 11):
+            if j in (1, 2, 3, 5, 8, 9, 10, 11, 12):
                 cell.alignment = Alignment(horizontal="center", vertical="center")
             if fill and j == 2:
                 cell.fill = PatternFill("solid", fgColor=fill)
@@ -133,7 +134,8 @@ def build_plan_xlsx(payload: dict) -> bytes:
     ws.merge_cells(start_row=r, start_column=1, end_row=r, end_column=ncols)
     c = ws.cell(
         row=r, column=1,
-        value="说明：往年最低分/位次为该单元最近一年投档数据；「档位」为规则模型初步判定（不含概率）。"
+        value="说明：往年最低分/位次为该单元最近一年投档数据；「档位」为规则模型初步判定（不含概率）；"
+              "「报考标记」为专业级特殊属性（中外合作/定向/预科/民族班/异地校区），涉及学费、协议、报考条件等，务必逐条核实。"
               "本表仅供参考，最终请以辽宁省招考部门及院校官方发布为准。",
     )
     c.font = Font(size=9, color="888888")
