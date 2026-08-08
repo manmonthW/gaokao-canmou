@@ -65,25 +65,55 @@ def stability_report(units):
     }
 
 
-def margin_sensitivity(units, margins=(0.85, 0.9, 0.95, 1.0)):
-    """以 2025 位次为申请人位次，2026 位次为近似真值，统计各档录取率。"""
+def margin_coverage(units, margins=(0.75, 0.80, 0.85, 0.90, 0.95)):
+    """保档 margin 直接测量（A1 定参主依据）：
+    以今年门槛 r25 为已知历史，保档规则 R <= r25×m。
+    - tighten_cdf(m) = P(r26/r25 <= m)：次年门槛收紧超过 margin 的比例（越小越好）；
+    - coverage(m) = 1 − tighten_cdf(m)：次年门槛仍 >= r25×m，即保档规则仍成立的比例。
+    生产用两年 best=min(r25,r26) 比本模拟更保守，实际覆盖不低于此值。"""
+    ratios = sorted((u["ranks"][2026] / u["ranks"][2025]) for u in units
+                    if u["ranks"][2025])
+    n = len(ratios)
+    cdf, out = {}, {}
+    for m in margins:
+        le = sum(1 for r in ratios if r <= m)
+        cdf[m] = le / n if n else None
+        out[m] = 1 - (le / n) if n else None
+    q = lambda p: ratios[min(n - 1, int(n * p))] if n else None
+    return out, cdf, {"p10": q(0.10), "p25": q(0.25), "p50": q(0.50),
+                      "p75": q(0.75), "p90": q(0.90)}
+
+
+def margin_sensitivity(units, margins=(0.70, 0.75, 0.80, 0.85, 0.90, 0.95, 1.0)):
+    """跨年模拟：以 2025 门槛定档（保 = R <= 门槛_25 × margin），
+    申请人位次扫描门槛邻域 R = q × r25，用 2026 实际投档作真值，
+    统计各 margin × 申请人位置下的各档录取覆盖率。
+
+    修正说明（2026-08-08，A1 回灌）：旧版固定 R=r25 且 best=r25，
+    margin<1 时「保」分支永不命中，扫描退化为常数，无法定参；本版重写。
+    """
+    qs = (0.90, 0.95, 1.00, 1.05, 1.10)  # 申请人位次相对 2025 门槛的位置
     out = {}
     for m in margins:
-        tier_hit = {"保": [0, 0], "稳": [0, 0], "冲": [0, 0]}
-        for u in units:
-            r25, r26 = u["ranks"][2025], u["ranks"][2026]
-            # 用 2025 单年作为「已知历史」模拟分类（best=worst=med=r25）
-            R = r25
-            if R <= r25 * m:
-                tier = "保"
-            elif R <= r25:  # R<=med(=r25) 且 > best*m 已在上一支；此处 R<=r25 即 R<=med
-                tier = "稳"
-            else:
-                tier = "冲"
-            admitted = R <= r26
-            tier_hit[tier][0] += int(admitted)
-            tier_hit[tier][1] += 1
-        out[m] = {k: (v[0] / v[1] if v[1] else None) for k, v in tier_hit.items()}
+        per_q = {}
+        for q in qs:
+            tier_hit = {"保": [0, 0], "稳": [0, 0], "冲": [0, 0]}
+            for u in units:
+                r25, r26 = u["ranks"][2025], u["ranks"][2026]
+                R = int(r25 * q)
+                if R <= r25 * m:
+                    tier = "保"
+                elif R <= r25:
+                    tier = "稳"
+                else:
+                    tier = "冲"
+                admitted = R <= r26
+                tier_hit[tier][0] += int(admitted)
+                tier_hit[tier][1] += 1
+            per_q[q] = {
+                k: (v[0] / v[1] if v[1] else None, v[1]) for k, v in tier_hit.items()
+            }
+        out[m] = per_q
     return out
 
 
@@ -101,13 +131,23 @@ async def main():
             st = stability_report(units)
             print(f"  跨年位次相对变动：中位 {st['median_rel_delta']:.1%} | "
                   f"P90 {st['p90_rel_delta']:.1%} | 高波动(≥50%)占比 {st['high_vol_rate']:.1%}")
+            cov, cdf, dist = margin_coverage(units)
+            print("  保档 margin 直接测量（门槛年际比值 r26/r25）：")
+            print(f"    分布：P10 {dist['p10']:.2f} | P25 {dist['p25']:.2f} "
+                  f"| P50 {dist['p50']:.2f} | P75 {dist['p75']:.2f} | P90 {dist['p90']:.2f}")
+            for m in cov:
+                print(f"    margin={m}: 收紧超限概率 {cdf[m]:.1%} → 保档规则仍成立 {cov[m]:.1%}")
             sens = margin_sensitivity(units)
-            print("  保档边界敏感度（2025位次→2026实际可录率）：")
-            for m, tiers in sens.items():
-                parts = "  ".join(
-                    f"{k}={('-' if t is None else f'{t:.0%}')}" for k, t in tiers.items()
-                )
-                print(f"    margin={m}: {parts}")
+            print("  保档边界敏感度（跨年模拟：2025门槛定档 → 2026实际可录率）：")
+            print("    申请人位次 R = q × 门槛_25；保 = R <= 门槛_25 × margin")
+            for m, per_q in sens.items():
+                for q in (0.95, 1.00, 1.05):
+                    tiers = per_q[q]
+                    parts = "  ".join(
+                        f"{k}={('-' if t is None else f'{t:.0%}')}(n={n})"
+                        for k, (t, n) in tiers.items()
+                    )
+                    print(f"    margin={m:<4} q={q}: {parts}")
     print("\n说明：2026 为最新可得年份，作为「是否可录取」的近似真值；")
     print("      保档边界 margin 越大越保守。结合上表校准 MATCH_CONFIG。")
     db.close_pool()

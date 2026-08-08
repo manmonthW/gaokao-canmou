@@ -14,11 +14,11 @@ meta = json.load(urllib.request.urlopen('http://127.0.0.1:8000/api/v1/meta'))
 cat = (meta.get('categories') or ['普通类'])[0]
 batches = meta.get('batches') or []
 batch = next((b for b in batches if '普通' in b), batches[0] if batches else '普通批')
-qs = urllib.parse.urlencode({'year': 2026, 'category': cat, 'subject': '物理类', 'batch': batch, 'score': 600, 'rank': 12000, 'page_size': 3})
+qs = urllib.parse.urlencode({'year': 2026, 'category': cat, 'subject': '物理学科类', 'batch': batch, 'score': 600, 'rank': 12000, 'page_size': 3})
 d = json.load(urllib.request.urlopen('http://127.0.0.1:8000/api/v1/match?' + qs))
-print('units:', len(d.get('units', [])))
+print('items:', len(d.get('items', [])))
 print('batch_context:', json.dumps(d.get('batch_context'), ensure_ascii=False)[:400])
 print('excluded_by_subject:', d.get('excluded_by_subject'))
-u = d.get('units', [])
+u = d.get('items', [])
 print('first unit flags:', u[0].get('flags') if u else None)
 EOF

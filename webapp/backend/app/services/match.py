@@ -1,17 +1,26 @@
-"""普通类智能匹配服务（Phase 2 MVP）。
+"""普通类智能匹配服务（Phase 2 MVP，A1–A4 算法层增强）。
 
 实现 spec §7 六步：
   1. 输入校验
   2. 资格/数据过滤（年份参考范围、类别/学科类/批次严格一致、常规≠征集、默认排最低位次空值）
   3. 构造招生候选单元 = 院校 + 专业 + 批次 + 志愿阶段（不按校聚合，避免掩盖同校专业位次差）
   4. 历史统计（覆盖年份、近一年位次、最好/最差/中位位次、跨度/波动、连续招生、断档）
-  5. 风险分类（冲/稳/保/高波动/数据不足，阈值可配，待回测）
+  5. 风险分类（冲/稳/保/高波动/数据不足；保档含回测固化的安全边际 margin）
   6. 偏好排序（仅影响同档内展示顺序，不改资格与基础风险）
 
+A1–A4 算法层增强（2026-08-08，依据 first-principles-review.md §5.2）：
+  - A1：「保」判据由 R<=best 收紧为 R <= best×safe_margin；margin=0.85 由
+    2025→2026 回测定参（门槛年际比值 P10≈0.87，margin=0.85 时保档规则
+    次年仍成立比例：物理 91.6% / 历史 92.4%，见 backtest_report.txt）；
+    解释文案改为区间语言：分档是对明年的区间判断，不是对历史的事实陈述。
+  - A2：回测报告固化（backtest_report.txt）+ classification_note 向用户公开分档依据。
+  - A3：sensitivity() 位次 ±5%/±10% 敏感度一键试算（同一批单元对多个 R 重算）。
+  - A4：has_both_years 与 n_years 口径统一（均基于有位次的年份）；
+    本科提前批 A/B 段跨年别名在代码层归一（_normalize_batch，不改数据）。
+
 说明：
-  - 当前库内「录取最低分」仅 373 行，远少于「投档最低分」(3.7 万行)，
-    故 MVP 统一以**投档最低分**对应的 lowest_rank 作为门槛位次（代表进档门槛）。
-    后续补录取分后，可在 step4 叠加录取分细化「稳/保」判定。
+  - 当前库内「录取最低分」仅 448 行且全在提前批，普通批官方只发投档线，
+    故统一以**投档最低分**对应的 lowest_rank 作为门槛位次（代表进档门槛）。
   - 历史跨 2025/2026 两年；考生位次与历史位次直接用「位次法」比较
     （R <= lowest_rank 表示考生位次优于该门槛，等价的分数更高）。
 """
@@ -20,11 +29,17 @@ from typing import Optional
 
 from app import db
 
-# --------------------------- 可调阈值（经回测后再固化） ---------------------------
+# --------------------------- 可调阈值（margin 已经 2025→2026 回测固化，其余阈值附回测依据） ---------------------------
 MATCH_CONFIG = {
     # 分类所需最少年份：<2 年判为「数据不足」
     "min_years": 2,
+    # 「保」档安全边际（A1）：R <= best × safe_margin 才判保。
+    # margin=0.85 回测定参：门槛年际比值 P10≈0.87，margin=0.85 时次年门槛仍 >= best×0.85
+    # 的比例为物理 91.6% / 历史 92.4%（backtest_report.txt）；
+    # 调整本参数必须附回测报告（spec §7.4，A2 制度化）。
+    "safe_margin": 0.85,
     # 高波动判定：相对波动(跨度/中位) >= 该值 且 绝对跨度 >= min_abs_span
+    # （回测：跨年相对变动中位 6.2%/7.4%、P90 31%/28%、≥50% 占比 4.7%/3.5%，0.5 阈值隔离尾部）
     "high_vol_rel": 0.5,
     "high_vol_abs": 2000,
     # 断档判定：最差年份位次 > 中位 * break_multiplier
@@ -32,6 +47,53 @@ MATCH_CONFIG = {
 }
 
 RISK_ORDER = ["保", "稳", "冲", "高波动", "数据不足"]
+
+# A4 批次别名归一（仅用于跨年单元合并，展示仍用原始批次名，不改数据）：
+# 2026 本科提前批拆为 A/B 段后，与 2025「本科提前批」为同一批次概念。
+BATCH_ALIASES = {"本科提前批A段": "本科提前批", "本科提前批B段": "本科提前批"}
+
+
+def _normalize_batch(batch):
+    return BATCH_ALIASES.get(batch, batch)
+
+
+def _batch_variants(batch):
+    """请求批次 + 归一到同一概念的所有别名段（A4，供 DB 过滤展开）。"""
+    norm = _normalize_batch(batch)
+    variants = {norm}
+    for alias, n in BATCH_ALIASES.items():
+        if n == norm:
+            variants.add(alias)
+    return sorted(variants)
+
+
+# A2 分档可信度说明（数字固化自 backtest_report.txt，2026-08-08 回测）。
+# 调整 MATCH_CONFIG 必须重跑回测并同步更新本说明（spec §7.4）。
+CLASSIFICATION_NOTE = {
+    "method": "位次法：拿每个单元历年录取最低分对应的全省位次，与你的位次比较，"
+              "分成保/稳/冲/高波动/数据不足五档；分档是对明年门槛的区间判断，不是对历史的事实陈述。",
+    "safe_margin": MATCH_CONFIG["safe_margin"],
+    "backtest": {
+        "pair": "用 2025 年数据判档、用 2026 年实际投档门槛检验（同单元跨年对照）",
+        "margin_coverage": (
+            "被判「保」的单元中，次年（2026）门槛实际没有越过安全线的比例："
+            "物理学科类本科批 91.6%（7,027 个单元）、历史学科类本科批 92.4%（1,896 个单元）"
+            "——即「保」的判定次年约九成依旧成立"),
+        "rel_delta": (
+            "录取位次年际变动：多数单元变动约 6–7%（中位数），九成单元变动在 30% 以内；"
+            "变动 ≥50% 的仅 4.7%/3.5%，这类单元会被标为「高波动」"),
+    },
+    "disclaimer": "以上比例衡量的是门槛跨年是否稳定（即分档规则是否可靠），不是录取概率；本站不输出概率数字。",
+}
+
+# A3 敏感度试算偏移（负值 = 位次变好）
+SENSITIVITY_OFFSETS = [
+    (-0.10, "位次 -10%（偏好）"),
+    (-0.05, "位次 -5%（偏好）"),
+    (0.0, "当前位次"),
+    (0.05, "位次 +5%（偏差）"),
+    (0.10, "位次 +10%（偏差）"),
+]
 
 # 再选科目全集（选科要求校验用，D2b）
 _SUBJECTS = ["物理", "化学", "生物", "政治", "历史", "地理"]
@@ -76,11 +138,12 @@ async def get_data_version() -> Optional[str]:
 
 def _build_unit_key(school_code, major_code, major_name, batch):
     mkey = major_code if major_code else major_name
-    return (school_code, mkey, batch)
+    # A4：批次别名归一，使 2025 本科提前批与 2026 A/B 段合并为同一单元
+    return (school_code, mkey, _normalize_batch(batch))
 
 
 def _classify(unit: dict, R: int, cfg: dict):
-    """返回 (risk, reason)。"""
+    """返回 (risk, reason)。区间语言：分档是对明年的区间判断，不是对历史的事实陈述（A1）。"""
     n = unit["n_years"]
     # 全部缺失最低位次：无法用位次法，降级为分数参考并标数据不足
     if n == 0:
@@ -88,6 +151,8 @@ def _classify(unit: dict, R: int, cfg: dict):
 
     single = n < cfg["min_years"]  # 仅 1 年：仍按该年分类，但提示参考性有限
     best, worst, med = unit["best_rank"], unit["worst_rank"], unit["median_rank"]
+    margin = cfg["safe_margin"]
+    safe_line = int(best * margin)  # 保档门槛：历史最难年门槛再收紧 margin
     rel = (unit["span"] / med) if med else 0.0
 
     # 高波动优先（位次极不稳定，单独成档；至少 2 年才有意义）
@@ -97,18 +162,32 @@ def _classify(unit: dict, R: int, cfg: dict):
             f"历年位次跨度大（{best}～{worst}，相对波动 {rel:.0%}），结果不确定性高。",
         )
 
-    if R <= best:
+    if R <= safe_line:
         base = "保"
-        reason = f"你的位次 {R} 优于历史最易年份最低位次 {best}（领先 {best - R} 名），录取把握大。"
+        reason = (
+            f"你的位次 {R} 优于历史门槛区间 [{best}, {worst}] 的最严端 {best}，"
+            f"且领先安全边际线 {safe_line} 达 {safe_line - R} 名。"
+            f"明年门槛可能在历史区间附近移动，按回测该幅度大概率不越过此安全边际。")
+    elif R <= best:
+        base = "稳"
+        reason = (
+            f"你的位次 {R} 优于历史最难年门槛 {best}，但未越过安全边际线 {safe_line}；"
+            f"门槛年际变动可能吃掉这段领先（回测口径），按「稳」对待。")
     elif R <= med:
         base = "稳"
-        reason = f"你的位次 {R} 介于历史最易 {best} 与中位 {med} 之间，较稳。"
+        reason = (
+            f"你的位次 {R} 落在历史门槛区间 [{best}, {worst}] 内、优于中位 {med}；"
+            f"明年门槛若在区间内移动，录取机会较大。")
     elif R <= worst:
         base = "冲"
-        reason = f"你的位次 {R} 介于中位 {med} 与历史最差 {worst} 之间，可冲刺。"
+        reason = (
+            f"你的位次 {R} 落在历史门槛区间 [{best}, {worst}] 内、劣于中位 {med}；"
+            f"需明年门槛偏向区间宽松端才可进档，属可冲刺。")
     else:
         base = "冲"
-        reason = f"你的位次 {R} 高于历史最差位次 {worst}，属高风险冲刺。"
+        reason = (
+            f"你的位次 {R} 位于历史门槛区间 [{best}, {worst}] 之外（落后最宽松端 {R - worst} 名），"
+            f"仅当明年门槛大幅放宽时才有可能，属高风险冲刺。")
 
     if unit["break_detected"]:
         reason += " 注意：存在年份断档（位次大幅跳变），历史参考性下降。"
@@ -155,40 +234,16 @@ def _build_candidate(unit: dict, R: int, cfg: dict):
         "break_detected": unit["break_detected"],
         "risk": risk,
         "risk_reason": reason,
+        "safe_line": int(unit["best_rank"] * cfg["safe_margin"]) if unit["best_rank"] else None,
         "rank_diff_last": rank_diff_last,
         "warning": warning,
         "yearly": [{"year": y, "lowest_rank": r} for y, r in unit["yearly"]],
     }
 
 
-async def match(
-    *,
-    year: int,
-    category: str,
-    subject: str,
-    batch: str,
-    rank: Optional[int] = None,
-    score: Optional[int] = None,
-    province: Optional[str] = None,
-    city: Optional[str] = None,
-    level: Optional[str] = None,
-    nature: Optional[str] = None,
-    type_: Optional[str] = None,
-    major_keyword: Optional[str] = None,
-    has_both_years: Optional[bool] = None,
-    risk: Optional[str] = None,
-    exclude_flags: Optional[list] = None,
-    electives: Optional[list] = None,
-    page: int = 1,
-    page_size: int = 30,
-    cfg: Optional[dict] = None,
-):
-    """普通类智能匹配主入口。"""
-    cfg = cfg or MATCH_CONFIG
-
-    # ---------- 第一步：输入校验 ----------
+async def _resolve_rank(year, category, subject, rank, score):
+    """仅有分数时借定位服务反查位次（区间取上界，更保守）。"""
     if rank is None and score is not None:
-        # 仅有分数：借定位服务反查位次
         from app.services import locate
 
         r = await locate.score_to_rank(year, category, subject, score)
@@ -196,15 +251,17 @@ async def match(
             rank = r["rank"]
         elif r.get("found") and r.get("rank_range"):
             rank = r["rank_range"][0]  # 取区间上界（更保守）
-    if rank is None or rank <= 0:
-        return {
-            "error": "请提供有效位次（正整数），或有效的分数以便反查位次。",
-            "examinee": {
-                "year": year, "category": category, "subject": subject,
-                "batch": batch, "score": score, "rank": rank,
-            },
-        }
+    return rank
 
+
+async def _prepare_candidates(
+    *, category, subject, batch, year, rank,
+    province=None, city=None, level=None, nature=None, type_=None,
+    major_keyword=None, has_both_years=None,
+    exclude_flags=None, electives=None, cfg,
+):
+    """第 2–4 步 + 选科校验 + 偏好筛选：返回筛选后候选（match 与 sensitivity 共用，A3）。
+    返回 (filtered, candidates_all, excluded_by_subject, subjreq_loaded)。"""
     # ---------- 第二步：资格/数据过滤 ----------
     # 包含 lowest_rank 为空行（库内约 570 行）：这些归入「数据不足」档，
     # 按 roadmap 要求降级为「分数参考」并显式标注，而非直接丢弃。
@@ -214,11 +271,11 @@ async def match(
                   p.province, p.city, p.level, p.nature, p.type
            FROM admission_scores a
            LEFT JOIN school_profiles p ON a.school_code = p.code
-           WHERE a.category = %s AND a.subject = %s AND a.batch = %s
+           WHERE a.category = %s AND a.subject = %s AND a.batch = ANY(%s)
              AND a.is_collection = FALSE
              AND a.score_kind = '投档最低分'
            ORDER BY a.school_code, a.major_name, a.batch, a.year""",
-        (category, subject, batch),
+        (category, subject, _batch_variants(batch)),
     )
 
     # ---------- 第三步：构造候选单元 ----------
@@ -230,12 +287,15 @@ async def match(
         key = _build_unit_key(sc, mc, mn, bt)
         u = units.get(key)
         if u is None:
+            # 跨年合并单元的批次名：优先用用户请求的批次名，避免展示成某年的别名段
             u = {
                 "school_code": sc, "school_name": sn,
-                "major_code": mc, "major_name": mn, "batch": bt,
+                "major_code": mc, "major_name": mn,
+                "batch": batch if _normalize_batch(bt) == _normalize_batch(batch) else bt,
                 "province": prov, "city": cty, "level": lvl,
                 "nature": nat, "type": typ,
                 "years": [], "ranks": [], "yearly": [], "scores": {},
+                "rank_years": set(),
                 "flags": set(),
             }
             units[key] = u
@@ -246,6 +306,7 @@ async def match(
         if lr is not None:
             u["ranks"].append(lr)
             u["yearly"].append((y, lr))
+            u["rank_years"].add(y)  # A4：有位次的年份（与 n_years 同源）
 
     # ---------- 第四步：历史统计 ----------
     for u in units.values():
@@ -260,7 +321,9 @@ async def match(
             u["span"] = ranks[-1] - ranks[0]
         else:
             u["best_rank"] = u["worst_rank"] = u["median_rank"] = u["span"] = None
-        u["has_both_years"] = (2025 in yrs and 2026 in yrs)
+        # A4 口径统一：has_both_years 与 n_years 均基于「有最低位次的年份」，
+        # 避免某年位次缺失时 has_both_years=True 但 n_years=1 的展示矛盾。
+        u["has_both_years"] = (2025 in u["rank_years"] and 2026 in u["rank_years"])
         u["continuous"] = (yrs == list(range(yrs[0], yrs[0] + len(yrs))))
         u["break_detected"] = (
             len(ranks) >= 2
@@ -355,6 +418,113 @@ async def match(
         return True
 
     filtered = [c for c in candidates if keep(c)]
+    return filtered, candidates, excluded_by_subject, subjreq_loaded
+
+
+def _totals_at_rank(candidates, R: int, cfg: dict):
+    """同一候选集在不同考生位次下重新分档计数（A3 敏感度一键试算）。"""
+    totals = {k: 0 for k in RISK_ORDER}
+    for c in candidates:
+        u = {"n_years": c["n_years"], "best_rank": c["best_rank"],
+             "worst_rank": c["worst_rank"], "median_rank": c["median_rank"],
+             "span": c["span"], "break_detected": c["break_detected"]}
+        risk, _ = _classify(u, R, cfg)
+        totals[risk] += 1
+    totals["total"] = len(candidates)
+    return totals
+
+
+async def sensitivity(
+    *,
+    year: int,
+    category: str,
+    subject: str,
+    batch: str,
+    rank: Optional[int] = None,
+    score: Optional[int] = None,
+    province: Optional[str] = None,
+    city: Optional[str] = None,
+    level: Optional[str] = None,
+    nature: Optional[str] = None,
+    type_: Optional[str] = None,
+    major_keyword: Optional[str] = None,
+    has_both_years: Optional[bool] = None,
+    exclude_flags: Optional[list] = None,
+    electives: Optional[list] = None,
+    cfg: Optional[dict] = None,
+):
+    """A3 敏感度一键试算：位次 ±5%/±10% 时同一候选集的分档变化。"""
+    cfg = cfg or MATCH_CONFIG
+    rank = await _resolve_rank(year, category, subject, rank, score)
+    if rank is None or rank <= 0:
+        return {"error": "请提供有效位次（正整数），或有效的分数以便反查位次。"}
+    filtered, _, excluded_by_subject, subjreq_loaded = await _prepare_candidates(
+        category=category, subject=subject, batch=batch, year=year, rank=rank,
+        province=province, city=city, level=level, nature=nature, type_=type_,
+        major_keyword=major_keyword, has_both_years=has_both_years,
+        exclude_flags=exclude_flags, electives=electives, cfg=cfg,
+    )
+    scenarios = []
+    for off, label in SENSITIVITY_OFFSETS:
+        R2 = max(1, int(round(rank * (1 + off))))
+        scenarios.append({
+            "label": label, "offset": off, "rank": R2,
+            "totals": _totals_at_rank(filtered, R2, cfg),
+        })
+    return {
+        "examinee": {"year": year, "category": category, "subject": subject,
+                     "batch": batch, "score": score, "rank": rank},
+        "excluded_by_subject": excluded_by_subject,
+        "subject_requirements_loaded": subjreq_loaded,
+        "scenarios": scenarios,
+        "note": ("试算基于同一候选集与分档规则（含安全边际），仅改变考生位次，"
+                 "用于展示分档边界对位次的敏感度，不是录取概率预测。"),
+    }
+
+
+async def match(
+    *,
+    year: int,
+    category: str,
+    subject: str,
+    batch: str,
+    rank: Optional[int] = None,
+    score: Optional[int] = None,
+    province: Optional[str] = None,
+    city: Optional[str] = None,
+    level: Optional[str] = None,
+    nature: Optional[str] = None,
+    type_: Optional[str] = None,
+    major_keyword: Optional[str] = None,
+    has_both_years: Optional[bool] = None,
+    risk: Optional[str] = None,
+    exclude_flags: Optional[list] = None,
+    electives: Optional[list] = None,
+    page: int = 1,
+    page_size: int = 30,
+    cfg: Optional[dict] = None,
+):
+    """普通类智能匹配主入口。"""
+    cfg = cfg or MATCH_CONFIG
+
+    # ---------- 第一步：输入校验 ----------
+    rank = await _resolve_rank(year, category, subject, rank, score)
+    if rank is None or rank <= 0:
+        return {
+            "error": "请提供有效位次（正整数），或有效的分数以便反查位次。",
+            "examinee": {
+                "year": year, "category": category, "subject": subject,
+                "batch": batch, "score": score, "rank": rank,
+            },
+        }
+
+    # ---------- 第 2–4 步 + 选科校验 + 偏好筛选（与 sensitivity 共用，A3） ----------
+    filtered, candidates, excluded_by_subject, subjreq_loaded = await _prepare_candidates(
+        category=category, subject=subject, batch=batch, year=year, rank=rank,
+        province=province, city=city, level=level, nature=nature, type_=type_,
+        major_keyword=major_keyword, has_both_years=has_both_years,
+        exclude_flags=exclude_flags, electives=electives, cfg=cfg,
+    )
 
     # 风险分档计数
     totals = {k: 0 for k in RISK_ORDER}
@@ -435,6 +605,7 @@ async def match(
         "totals": totals,
         "excluded_by_subject": excluded_by_subject,
         "subject_requirements_loaded": subjreq_loaded,
+        "classification_note": CLASSIFICATION_NOTE,
         "batch_context": batch_context,
         "facets": {k: [{"value": v, "count": c} for v, c in lst] for k, lst in facets.items()},
         "page": page,

@@ -67,6 +67,7 @@ import type {
   SourceFile,
   PublicationStatus,
   MatchResponse,
+  SensitivityResponse,
   RankContext,
   AuthUser,
   AuthResult,
@@ -113,6 +114,8 @@ export const api = {
   publicationStatus: () => getJson<PublicationStatus[]>('/datacenter/publication-status'),
   match: (p: Record<string, unknown>) =>
     getJson<MatchResponse>(`/match${buildQuery(p)}`),
+  matchSensitivity: (p: Record<string, unknown>) =>
+    getJson<SensitivityResponse>(`/match/sensitivity${buildQuery(p)}`),
   // ---- 热门大学介绍 ----
   hotSchoolCategories: () =>
     getJson<{ categories: HotSchoolCategory[]; total: number }>('/hot-schools/categories'),

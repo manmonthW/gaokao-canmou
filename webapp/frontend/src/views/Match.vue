@@ -4,7 +4,7 @@ import { ElMessage } from 'element-plus'
 import { api } from '@/api/client'
 import { useProfile, EXAMINEE_YEAR } from '@/composables/useProfile'
 import { usePlanner, toSnapshot, candidateId } from '@/composables/usePlanner'
-import type { MatchResponse, MatchCandidate, RiskLabel } from '@/types'
+import type { MatchResponse, MatchCandidate, RiskLabel, SensitivityResponse } from '@/types'
 import DataStatusBanner from '@/components/DataStatusBanner.vue'
 import PlanBasket from '@/components/PlanBasket.vue'
 import SchoolDrawer from '@/components/SchoolDrawer.vue'
@@ -90,6 +90,7 @@ const totalForActive = computed(() =>
 async function runMatch(resetPage = true) {
   if (resetPage) page.value = 1
   error.value = null
+  sens.value = null // 条件变化后旧试算作废（A3）
   if (!profile.value.rank) {
     error.value = '请先在上方填写全省位次（必填），可同时填分数辅助校验。'
     data.value = null
@@ -162,6 +163,69 @@ function diffClass(d: number | null) {
   if (d < 0) return 'diff--ahead'
   if (d > 0) return 'diff--behind'
   return 'diff--flat'
+}
+
+// ---------- A2/A3：分档可信度说明 + 位次敏感度试算 ----------
+const noteOpen = ref<string[]>([])
+const sens = ref<SensitivityResponse | null>(null)
+const sensLoading = ref(false)
+
+// 敏感度表的读法：直接引用「当前位次」行各格数字，用「你这个位次当年录不录」的白话解释
+const sensExplain = computed(() => {
+  const s = sens.value
+  const cur = s?.scenarios?.find((x) => x.offset === 0)
+  const r = s?.examinee?.rank ?? null
+  if (!cur || !r) return null
+  return { r, t: cur.totals }
+})
+
+// 风险档白话解释（chips 悬停提示）
+function riskExplain(r: RiskLabel): string {
+  switch (r) {
+    case '保':
+      return '历年最难的一年，你这个位次也录得上，且缓冲过了安全线：明年稍难也稳当'
+    case '稳':
+      return '历年你这个位次都录得上，但缓冲薄：门槛若上移有风险'
+    case '冲':
+      return '历年你这个位次都录不上（录取末位比你靠前）：需明年门槛下移才有机会'
+    case '高波动':
+      return '历年录取位次忽高忽低、跨度大，分档仅供参考'
+    default:
+      return '历史数据少于 2 年，仅供参考'
+  }
+}
+function runSensitivity() {
+  if (!profile.value.rank) {
+    ElMessage.warning('请先填写全省位次')
+    return
+  }
+  sensLoading.value = true
+  api.matchSensitivity({
+    year: profile.value.year,
+    category: profile.value.category,
+    subject: profile.value.subject,
+    batch: profile.value.batch,
+    rank: profile.value.rank ?? undefined,
+    score: profile.value.score ?? undefined,
+    province: filters.value.province || undefined,
+    city: filters.value.city || undefined,
+    level: filters.value.level || undefined,
+    nature: filters.value.nature || undefined,
+    type: filters.value.type || undefined,
+    major_keyword: filters.value.major_keyword || undefined,
+    has_both_years: filters.value.has_both_years || undefined,
+    exclude_flags: filters.value.exclude_flags.join(',') || undefined,
+    electives: profile.value.electives?.length
+      ? profile.value.electives.join(',')
+      : undefined,
+  }).then((r) => {
+    sens.value = r
+    if (r?.error) ElMessage.warning(r.error)
+  }).catch((e) => {
+    ElMessage.error((e as Error).message)
+  }).finally(() => {
+    sensLoading.value = false
+  })
 }
 
 // 批次数据口径提示（D4）：让每条结果知道自己处在什么数据环境下
@@ -296,17 +360,23 @@ onMounted(async () => {
     <template v-if="data">
       <!-- 风险档计数 -->
       <div class="risk-chips">
-        <button
+        <el-tooltip
           v-for="r in RISKS"
           :key="r.key"
-          class="chip"
-          :class="['chip--' + r.type, { 'chip--active': activeRisk === r.key }]"
-          @click="onRiskTab(r.key)"
+          :content="riskExplain(r.key)"
+          placement="bottom"
+          :show-after="200"
         >
-          <span class="chip__label">{{ r.label }}</span>
-          <span class="chip__num">{{ data.totals[r.key] }}</span>
-          <span class="chip__hint">{{ RISK_HINT[r.key] }}</span>
-        </button>
+          <button
+            class="chip"
+            :class="['chip--' + r.type, { 'chip--active': activeRisk === r.key }]"
+            @click="onRiskTab(r.key)"
+          >
+            <span class="chip__label">{{ r.label }}</span>
+            <span class="chip__num">{{ data.totals[r.key] }}</span>
+            <span class="chip__hint">{{ RISK_HINT[r.key] }}</span>
+          </button>
+        </el-tooltip>
       </div>
 
       <!-- 批次数据口径（D4）：每条结果所处的发布环境 -->
@@ -330,6 +400,99 @@ onMounted(async () => {
       <p v-if="data.excluded_by_subject" class="subj-note">
         已按再选科目排除 {{ data.excluded_by_subject }} 个不符合选科要求的单元。
       </p>
+
+      <!-- 分档规则与位次敏感度：① 怎么判的 ② 位次若有偏差会怎样（A2/A3） -->
+      <el-card v-if="data.classification_note" class="card" shadow="never">
+        <template #header>
+          <div class="card__head"><span>分档规则与位次敏感度</span></div>
+        </template>
+
+        <!-- ① 分档依据 -->
+        <div class="sec">
+          <div class="sec__head">
+            <span class="sec__title">① 分档依据</span>
+            <span class="sec__sub">冲/稳/保/高波动/数据不足 五档是怎么判的</span>
+          </div>
+          <p class="hint">
+            本站拿「每个单元历年录取最低分对应的全省位次」与你的位次比较来分档（位次法），不输出录取概率。
+            「保」档另要求缓冲足够：你的位次需优于「最难一年门槛 × {{ data.classification_note.safe_margin }}」（安全线）。
+          </p>
+          <el-collapse v-model="noteOpen">
+            <el-collapse-item name="note">
+              <template #title>查看每档具体怎么算 + 回测数据</template>
+              <p class="note-line"><b>保</b>：历年哪怕最难的一年，你这个位次也录得上，且缓冲过了安全线（最难一年门槛 × {{ data.classification_note.safe_margin }}）——明年稍难也安全；</p>
+              <p class="note-line"><b>稳</b>：历年你这个位次都录得上，但缓冲薄、没过安全线——门槛若上移有风险；</p>
+              <p class="note-line"><b>冲</b>：历年你这个位次都录不上（当年录取末位比你靠前）——需明年门槛下移才有机会；</p>
+              <p class="note-line"><b>高波动</b>：历年录取位次忽高忽低、摸不清规律——分档仅参考；</p>
+              <p class="note-line"><b>数据不足</b>：历史数据少于 2 年——仅参考。</p>
+              <p class="note-line"><b>回测检验</b>（{{ data.classification_note.backtest.pair }}）：{{ data.classification_note.backtest.margin_coverage }}。</p>
+              <p class="note-line"><b>门槛跨年稳定性</b>：{{ data.classification_note.backtest.rel_delta }}。</p>
+              <p class="note-line note-line--muted">{{ data.classification_note.disclaimer }}</p>
+            </el-collapse-item>
+          </el-collapse>
+        </div>
+
+        <el-divider class="sec-divider" />
+
+        <!-- ② 位次敏感度试算 -->
+        <div class="sec">
+          <div class="sec__head">
+            <span class="sec__title">② 位次敏感度试算</span>
+            <el-button size="small" :loading="sensLoading" @click="runSensitivity">开始试算（±5% / ±10%）</el-button>
+          </div>
+          <p class="hint">
+            什么是试算：位次是按分数在一分一段表里查的，但同一分数往往有很多人，
+            表里只给累计人数，你在同分人群中的确切位置并不知道，所以你用的位次和真实位次之间有一个误差区间。
+            这里用与①相同的分档规则（含安全线），把位次按 ±5% / ±10% 五种情景重新统计各档单元数，
+            看「位次若有偏差，分档结果会怎么变」——用来检查你的志愿梯度是否留够；不是录取概率预测。
+          </p>
+        <div v-if="sens" class="sens">
+          <el-alert v-if="sens.error" type="error" :title="sens.error" show-icon :closable="false" />
+          <template v-else>
+            <p class="hint sens-legend">
+              表中数字是<b>单元个数</b>（一个「院校 + 专业」组合算一个单元），不是位次。
+              「−10%」指位次数字变小 10%（排名更靠前、更好），「+10%」指位次数字变大 10%（排名更靠后、更差）。
+            </p>
+            <el-table :data="sens.scenarios" size="small" border style="width: 100%">
+              <el-table-column label="情景" min-width="150">
+                <template #default="{ row }">
+                  <span :class="{ 'sens-cur': row.offset === 0 }">{{ row.label }}</span>
+                </template>
+              </el-table-column>
+              <el-table-column label="位次" width="110" align="right">
+                <template #default="{ row }"><span class="tnum">{{ row.rank.toLocaleString() }}</span></template>
+              </el-table-column>
+              <el-table-column v-for="r in RISKS" :key="r.key" :label="r.label" width="90" align="right">
+                <template #default="{ row }">
+                  <span class="tnum">{{ row.totals[r.key]?.toLocaleString() }}</span>
+                </template>
+              </el-table-column>
+            </el-table>
+            <div v-if="sensExplain" class="sens-explain">
+              <p class="hint">
+                <b>怎么看这张表</b>（以「当前位次」行为例，你的位次 {{ sensExplain.r.toLocaleString() }}）：
+              </p>
+              <p class="hint">
+                · 「保」下的 <b>{{ sensExplain.t['保'].toLocaleString() }}</b> ＝ {{ sensExplain.t['保'].toLocaleString() }} 个单元「历年哪怕最难的一年，你这个位次也录得上」，且缓冲足够大（过了安全线）：明年就算变难一点，依旧安全；
+              </p>
+              <p class="hint">
+                · 「稳」下的 <b>{{ sensExplain.t['稳'].toLocaleString() }}</b> ＝ {{ sensExplain.t['稳'].toLocaleString() }} 个单元「历年你这个位次都录得上，但缓冲薄」（没过安全线）：明年门槛若上移，这段领先可能被吃掉；
+              </p>
+              <p class="hint">
+                · 「冲」下的 <b>{{ sensExplain.t['冲'].toLocaleString() }}</b> ＝ {{ sensExplain.t['冲'].toLocaleString() }} 个单元「历年你这个位次都录不上」（当年录取末位比你靠前）：只有明年门槛下移才有机会；
+              </p>
+              <p class="hint">
+                · 「高波动」下的 <b>{{ sensExplain.t['高波动'].toLocaleString() }}</b> ＝ 历年录取位次忽高忽低、摸不清规律的单元，仅参考；「数据不足」下的 <b>{{ sensExplain.t['数据不足'].toLocaleString() }}</b> ＝ 历史数据少于 2 年的单元。
+              </p>
+              <p class="hint note-line--muted">
+                安全线 ＝ 最难一年门槛 × {{ data?.classification_note?.safe_margin ?? 0.85 }}，是判「保」要求的缓冲；每个单元的具体安全线，在下方结果表展开该行见「保档安全边际线」。
+              </p>
+            </div>
+            <p class="hint">{{ sens.note }}</p>
+          </template>
+        </div>
+        </div>
+      </el-card>
 
       <!-- 筛选器 -->
       <el-card class="card" shadow="never">
@@ -371,7 +534,7 @@ onMounted(async () => {
           <span>{{ activeRisk }} · 共 {{ totalForActive.toLocaleString() }} 项</span>
         </div>
         <el-table :data="data.items" size="small" border :row-key="rowKey" :expand-row-keys="Object.keys(expandedRows)" @expand-change="(r:any)=>{const k=rowKey(r); expandedRows[k]=!expandedRows[k]}" style="width:100%">
-          <el-table-column type="expand">
+          <el-table-column type="expand" fixed="left">
             <template #default="{ row }">
               <div class="yr">
                 <span class="yr__t">历年最低位次：</span>
@@ -380,14 +543,21 @@ onMounted(async () => {
                 </span>
                 <span class="yr__m">（覆盖 {{ row.n_years }} 年）</span>
               </div>
+              <div v-if="row.safe_line" class="yr">
+                <span class="yr__t">保档安全边际线：</span>
+                <b class="tnum">{{ row.safe_line.toLocaleString() }}</b>
+                <span class="yr__m">
+                  （最难年门槛 × {{ data?.classification_note?.safe_margin ?? 0.85 }}；位次优于此线才判「保」）
+                </span>
+              </div>
             </template>
           </el-table-column>
-          <el-table-column prop="school_name" label="院校" min-width="170" show-overflow-tooltip>
+          <el-table-column prop="school_name" label="院校" min-width="170" show-overflow-tooltip fixed="left">
             <template #default="{ row }">
               <a class="school-link" @click.stop="openSchool(row.school_code)">{{ row.school_name }}</a>
             </template>
           </el-table-column>
-          <el-table-column prop="major_name" label="专业" min-width="170" show-overflow-tooltip>
+          <el-table-column prop="major_name" label="专业" min-width="170" show-overflow-tooltip fixed="left">
             <template #default="{ row }">
               <a v-if="row.catalog_name" class="major-link" @click.stop="openMajor(row.catalog_name)">{{ row.major_name }}</a>
               <span v-else>{{ row.major_name }}</span>
@@ -412,9 +582,19 @@ onMounted(async () => {
             <template #default="{ row }">{{ row.province }}{{ row.city ? '·' + row.city : '' }}</template>
           </el-table-column>
           <el-table-column label="近年最低位次（2026）" width="130" align="right">
+            <template #header>
+              <el-tooltip content="2026 年该单元录取最低分对应的全省位次：数字越大，表示当年越容易录。" placement="top">
+                <span class="th-help">近年最低位次（2026）</span>
+              </el-tooltip>
+            </template>
             <template #default="{ row }"><span class="tnum">{{ row.last_year_rank?.toLocaleString() }}</span></template>
           </el-table-column>
           <el-table-column label="最好/最差/中位" align="right" min-width="170">
+            <template #header>
+              <el-tooltip content="历年门槛位次：最好 = 历史最小位次（最难的一年）；最差 = 最大位次（最易的一年）；中位 = 中间值。跨度大说明门槛不稳定。" placement="top">
+                <span class="th-help">最好/最差/中位</span>
+              </el-tooltip>
+            </template>
             <template #default="{ row }">
               <span class="tnum">{{ row.best_rank.toLocaleString() }}</span> /
               <span class="tnum">{{ row.worst_rank.toLocaleString() }}</span> /
@@ -458,6 +638,7 @@ onMounted(async () => {
         </div>
         <p class="hint">
           说明：以投档最低分对应位次为门槛，用「位次法」与你的位次比较。
+          位次数字越大 = 要求分数越低 = 越容易录。
           「保/稳/冲」为规则模型初步判定，<strong>不显示概率</strong>；高波动表示历年位次跨度大、不确定性高；数据不足表示历史年份少于 2 年，仅供参考。
         </p>
       </el-card>
@@ -566,6 +747,18 @@ onMounted(async () => {
 .pg { display: flex; justify-content: flex-end; margin-top: var(--space-3); }
 .ctx-alert { line-height: 1.7; }
 .subj-note { margin: 0 0 var(--space-3); font-size: var(--text-sm); color: var(--color-text-secondary); }
+.note-line { margin: 4px 0; font-size: var(--text-sm); color: var(--color-text-secondary); line-height: 1.7; }
+.note-line b { color: var(--color-text); font-weight: 600; }
+.note-line--muted { color: var(--color-text-muted); font-size: var(--text-xs); }
+.sens { margin-top: var(--space-3); }
+.sec__head { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); margin-bottom: var(--space-2); }
+.sec__title { font-weight: 700; }
+.sec__sub { font-size: var(--text-xs); color: var(--color-text-muted); }
+.sec-divider { margin: var(--space-4) 0; }
+.sens-legend { margin: 0 0 var(--space-2); }
+.sens-explain { margin-top: var(--space-2); }
+.th-help { cursor: help; border-bottom: 1px dotted currentColor; }
+.sens-cur { font-weight: 700; color: var(--color-primary); }
 .flag-excl { display: inline-flex; flex-wrap: wrap; gap: var(--space-2); }
 .flag-tag { margin-left: 4px; cursor: help; }
 .hint { color: var(--color-text-muted); font-size: var(--text-xs); margin: var(--space-3) 0 0; line-height: 1.7; }

@@ -398,6 +398,8 @@ export interface MatchCandidate {
   break_detected: boolean
   risk: RiskLabel
   risk_reason: string
+  /** 保档安全边际线 = 最难年门槛 × safe_margin（A1，回测固化） */
+  safe_line: number | null
   rank_diff_last: number | null
   warning: string | null
   flags: string[]
@@ -458,8 +460,36 @@ export interface MatchResponse {
   page_size: number
   items: MatchCandidate[]
   batch_context?: BatchContext
+  classification_note?: ClassificationNote
   excluded_by_subject?: number
   subject_requirements_loaded?: boolean
+  error?: string
+}
+
+/** 分档可信度说明（A2）：向用户公开分档方法与回测依据 */
+export interface ClassificationNote {
+  method: string
+  safe_margin: number
+  backtest: {
+    pair: string
+    margin_coverage: string
+    rel_delta: string
+  }
+  disclaimer: string
+}
+
+/** 位次敏感度试算响应（A3） */
+export interface SensitivityResponse {
+  examinee: MatchExaminee
+  excluded_by_subject: number
+  subject_requirements_loaded: boolean
+  scenarios: {
+    label: string
+    offset: number
+    rank: number
+    totals: MatchTotals
+  }[]
+  note: string
   error?: string
 }
 
