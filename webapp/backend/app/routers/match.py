@@ -13,6 +13,8 @@ async def match(
     batch: str = Query(...),
     rank: Optional[int] = Query(None),
     score: Optional[int] = Query(None),
+    rank_lo: Optional[int] = Query(None, description="P1 备考期：估计位次下界（更好），与 rank_hi 同给启用区间模式"),
+    rank_hi: Optional[int] = Query(None, description="P1 备考期：估计位次上界（更差）"),
     province: Optional[str] = Query(None),
     city: Optional[str] = Query(None),
     level: Optional[str] = Query(None),
@@ -25,19 +27,23 @@ async def match(
         None, description="排除含指定报考标记的单元，逗号分隔，如 中外合作,定向"),
     electives: Optional[str] = Query(
         None, description="再选科目，逗号分隔，如 化学,生物；仅当该年选科要求已入库时生效"),
+    pref_sort: Optional[str] = Query(
+        None, description="P5 同档内排序偏好：certainty 确定性优先（默认）/ level 院校层次优先 / city 城市分级优先"),
     page: int = Query(1, ge=1),
     page_size: int = Query(30, ge=1, le=200),
 ):
     """普通类智能匹配：输入分数+位次 → 定位 + 冲稳保候选，每项可解释。"""
     return await svc.match(
         year=year, category=category, subject=subject, batch=batch,
-        rank=rank, score=score, province=province, city=city, level=level,
+        rank=rank, score=score, rank_lo=rank_lo, rank_hi=rank_hi,
+        province=province, city=city, level=level,
         nature=nature, type_=type, major_keyword=major_keyword,
         has_both_years=has_both_years, risk=risk,
         exclude_flags=[s.strip() for s in exclude_flags.split(",") if s.strip()]
         if exclude_flags else None,
         electives=[s.strip() for s in electives.split(",") if s.strip()]
         if electives else None,
+        pref_sort=pref_sort,
         page=page, page_size=page_size,
     )
 

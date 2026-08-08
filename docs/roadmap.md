@@ -93,7 +93,7 @@
 
 ---
 
-## 四、当前进展（截至 2026-07-29）
+## 四、当前进展（截至 2026-08-08）
 
 ### ✅ Phase 0 — 已完成
 - 配置安全整改：`.env` 注入 `GAOKAO_DSN`；数据库只读账号 `gaokao_web_ro` 已建并授权（`0000_role.sql` + `0003_grants.sql`）。
@@ -198,6 +198,19 @@
 
 验证：match 冒烟（2026 物理学科类本科批 位次 12000）total 15,570，标记与 batch_context 输出正确；后端 py_compile 全过；本地部署 :5173/:8000 联调通过。
 
+### ✅ 产品层落地 — P1–P6（2026-08-08）
+
+落实 `first-principles-review.md` §5.3，完整记录见 **`docs/changelog-2026-08-08-p1-p6.md`**：
+
+- **P1 备考期双模式（P0）**：`/match` 支持位次区间（rank_lo/rank_hi 双档判定 + totals/totals_lo）；线差法估位 `/locate/estimate-rank`（模考分−模考线 → 历史同年位次区间，±10% 外扩）；前端档案区间模式 + 定位页估位工具 + 匹配页双档展示。
+- **P2 志愿表一等公民（P1）**：工作台 SVG 整表覆盖曲线（叠加考生位次线）；analyzePlan 升级为位置规则（尾部保底/位次倒挂/断层）；梯度模板一键生成（冲30/稳40/保30）。
+- **P3 匿名优先（P1）**：取消强制登录守卫；匿名保留 localStorage 数据，登录时云端为空则上推合并；匿名也显示完整应用壳。
+- **P4 反馈闭环（P1）**：SQLite `outcome_feedback` 表（刻意不碰只读 PG，无 0013 迁移）+ `POST /feedback`（匿名可用）+ 汇总接口 + 工作台自愿回填入口；2027 年 8 月录取结束后收集第一个真实标签集。
+- **P5 偏好最小版（P2）**：`pref_sort` 同档内重排（确定性/院校层次/城市分级）；学费 ≤2 万/年以「中外合作」标记作代理过滤。
+- **P6 往年征集参考（P2）**：`GET /datacenter/collection-reference`（位次带内征集记录 + 醒目免责 note）+ 数据中心标签页；match 依旧始终排除征集，两者不冲突。
+
+验证：pytest 32 passed；重启后冒烟（`smoke_p1p6.sh`）六项能力全部输出正确（详见 changelog §九）。
+
 ---
 
 ## 五、环境运行方式
@@ -235,4 +248,4 @@ psql -U gaokao    -h localhost -d gaokao -f backend/migrations/0012_subject_requ
 ---
 
 ## 六、下一步建议
-按第一性评审优先级：**D1 补 2023/2024 录取数据**（分档可信化先决条件；四年数据可将 margin 回测对扩到 3 对）→ P1 双模式（备考期位次区间 + 线差法估位）→ 评审 §5.3+ 其余建议。A1–A4 已于 2026-08-08 落地（见 `docs/changelog-2026-08-08-a1-a4.md`）；2027 官方选科要求发布后运行 `load_subject_requirements.py` 即自动启用硬过滤；新数据入库后需重跑 `webapp/scripts/run_backtest.sh` 刷新 CLASSIFICATION_NOTE 固化数字。
+按第一性评审优先级：**D1 补 2023/2024 录取数据**仍是最高优先（分档可信化先决条件；四年数据可将 margin 回测对扩到 3 对，P1 估位也能扩为多年参照）。算法层 A1–A4 与产品层 P1–P6 均已于 2026-08-08 落地（见 `docs/changelog-2026-08-08-a1-a4.md` / `docs/changelog-2026-08-08-p1-p6.md`）；2027 官方选科要求发布后运行 `load_subject_requirements.py` 即自动启用硬过滤；新数据入库后需重跑 `webapp/scripts/run_backtest.sh` 刷新 CLASSIFICATION_NOTE 固化数字；**2027 年 8 月录取结束后启动 P4 回填收集**（正式启用前先清空冒烟写入的测试行）。

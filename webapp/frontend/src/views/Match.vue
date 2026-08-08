@@ -83,16 +83,44 @@ function flagTagType(flag: string) {
 const page = ref(1)
 const PAGE_SIZE = 30
 
+// P5 学费代理过滤：「不接受高学费」勾选 → 自动并入排除标记（中外合作办学）
+const TUITION_PROXY_FLAG = '中外合作'
+const exclFlags = computed(() => {
+  const excl = [...filters.value.exclude_flags]
+  if (profile.value.tuition_cap && !excl.includes(TUITION_PROXY_FLAG)) {
+    excl.push(TUITION_PROXY_FLAG)
+  }
+  return excl
+})
+
 const totalForActive = computed(() =>
   data.value ? data.value.totals[activeRisk.value] : 0,
+)
+
+// P1 备考期模式：估计位次区间（下界 = 乐观视角，上界 = 悲观主视角）
+const isInterval = computed(() => profile.value.rank_mode === 'interval')
+const intervalValid = computed(() => {
+  const lo = profile.value.rank_lo
+  const hi = profile.value.rank_hi
+  return !!(lo && hi && lo > 0 && hi > 0 && lo <= hi)
+})
+// 试算锚点位次：区间模式取悲观上界
+const sensRank = computed(() =>
+  isInterval.value ? profile.value.rank_hi ?? null : profile.value.rank ?? null,
 )
 
 async function runMatch(resetPage = true) {
   if (resetPage) page.value = 1
   error.value = null
   sens.value = null // 条件变化后旧试算作废（A3）
-  if (!profile.value.rank) {
-    error.value = '请先在上方填写全省位次（必填），可同时填分数辅助校验。'
+  if (isInterval.value) {
+    if (!intervalValid.value) {
+      error.value = '请填写估计位次区间：上下界均为正整数，且下界 ≤ 上界。可在「我的定位」页用线差法估位。'
+      data.value = null
+      return
+    }
+  } else if (!profile.value.rank) {
+    error.value = '请先在上方填写全省位次（必填），可同时填分数辅助校验；备考期可切换「估计位次区间」。'
     data.value = null
     return
   }
@@ -103,7 +131,9 @@ async function runMatch(resetPage = true) {
       category: profile.value.category,
       subject: profile.value.subject,
       batch: profile.value.batch,
-      rank: profile.value.rank ?? undefined,
+      ...(isInterval.value
+        ? { rank_lo: profile.value.rank_lo ?? undefined, rank_hi: profile.value.rank_hi ?? undefined }
+        : { rank: profile.value.rank ?? undefined }),
       score: profile.value.score ?? undefined,
       province: filters.value.province || undefined,
       city: filters.value.city || undefined,
@@ -112,9 +142,12 @@ async function runMatch(resetPage = true) {
       type: filters.value.type || undefined,
       major_keyword: filters.value.major_keyword || undefined,
       has_both_years: filters.value.has_both_years || undefined,
-      exclude_flags: filters.value.exclude_flags.join(',') || undefined,
+      exclude_flags: exclFlags.value.join(',') || undefined,
       electives: profile.value.electives?.length
         ? profile.value.electives.join(',')
+        : undefined,
+      pref_sort: profile.value.pref_sort && profile.value.pref_sort !== 'certainty'
+        ? profile.value.pref_sort
         : undefined,
       risk: activeRisk.value,
       page: page.value,
@@ -195,8 +228,8 @@ function riskExplain(r: RiskLabel): string {
   }
 }
 function runSensitivity() {
-  if (!profile.value.rank) {
-    ElMessage.warning('请先填写全省位次')
+  if (!sensRank.value) {
+    ElMessage.warning('请先填写全省位次（或估计位次区间）')
     return
   }
   sensLoading.value = true
@@ -205,7 +238,7 @@ function runSensitivity() {
     category: profile.value.category,
     subject: profile.value.subject,
     batch: profile.value.batch,
-    rank: profile.value.rank ?? undefined,
+    rank: sensRank.value ?? undefined,
     score: profile.value.score ?? undefined,
     province: filters.value.province || undefined,
     city: filters.value.city || undefined,
@@ -214,7 +247,7 @@ function runSensitivity() {
     type: filters.value.type || undefined,
     major_keyword: filters.value.major_keyword || undefined,
     has_both_years: filters.value.has_both_years || undefined,
-    exclude_flags: filters.value.exclude_flags.join(',') || undefined,
+    exclude_flags: exclFlags.value.join(',') || undefined,
     electives: profile.value.electives?.length
       ? profile.value.electives.join(',')
       : undefined,
@@ -233,9 +266,9 @@ const batchContextText = computed(() => {
   const bc = data.value?.batch_context
   if (!bc) return ''
   const pubs = bc.publication
-    .map((p) => `${p.stage}：${p.status}${p.official_published_at ? `（官方发布 ${String(p.official_published_at).slice(0, 10)}）` : ''}`)
+    .map((p) => `${p.year} ${p.stage}：${p.status}${p.official_published_at ? `（官方发布 ${String(p.official_published_at).slice(0, 10)}）` : ''}`)
     .join('；')
-  return bc.score_kind_note + (pubs ? ` 本批发布进度：${pubs}` : '')
+  return bc.score_kind_note + (pubs ? ` 历史录取年发布进度：${pubs}` : '')
 })
 
 const expandedRows = ref<Record<string, boolean>>({})
@@ -280,7 +313,7 @@ function createPlanAndAdd() {
 
 onMounted(async () => {
   meta.value = await api.meta().catch(() => null)
-  if (profile.value.rank) runMatch(true)
+  if (profile.value.rank || (isInterval.value && intervalValid.value)) runMatch(true)
 })
 </script>
 
@@ -300,7 +333,11 @@ onMounted(async () => {
         <span class="profile-bar__seg">{{ profile.subject }}</span>
         <span class="profile-bar__seg">{{ profile.batch || '未选批次' }}</span>
         <span v-if="profile.electives?.length" class="profile-bar__seg">再选 {{ profile.electives.join('/') }}</span>
-        <span class="profile-bar__seg profile-bar__seg--key tnum">位次 {{ profile.rank?.toLocaleString() ?? '未填' }}</span>
+        <span v-if="isInterval" class="profile-bar__seg profile-bar__seg--key tnum">
+          估计位次 {{ profile.rank_lo?.toLocaleString() ?? '未填' }} – {{ profile.rank_hi?.toLocaleString() ?? '未填' }}
+        </span>
+        <span v-else class="profile-bar__seg profile-bar__seg--key tnum">位次 {{ profile.rank?.toLocaleString() ?? '未填' }}</span>
+        <span v-if="profile.tuition_cap" class="profile-bar__seg" style="background: var(--el-color-warning-light-9); color: var(--el-color-warning);">学费过滤开</span>
         <span class="profile-bar__ref">· 对比历史投档数据</span>
       </div>
       <el-button link type="primary" @click="editingProfile = true">修改</el-button>
@@ -344,9 +381,23 @@ onMounted(async () => {
           </el-form-item>
         </div>
         <div class="form__row">
-          <el-form-item label="全省位次" required>
+          <el-form-item label="位次类型">
+            <el-radio-group v-model="profile.rank_mode">
+              <el-radio value="exact">出分后·精确位次</el-radio>
+              <el-radio value="interval">备考期·估计位次区间</el-radio>
+            </el-radio-group>
+          </el-form-item>
+          <el-form-item v-if="!isInterval" label="全省位次" required>
             <el-input v-model.number="profile.rank" type="number" style="width: 170px" placeholder="必填" />
           </el-form-item>
+          <template v-else>
+            <el-form-item label="位次下界" required>
+              <el-input v-model.number="profile.rank_lo" type="number" style="width: 150px" placeholder="更好，如 40000" />
+            </el-form-item>
+            <el-form-item label="位次上界" required>
+              <el-input v-model.number="profile.rank_hi" type="number" style="width: 150px" placeholder="更差，如 50000" />
+            </el-form-item>
+          </template>
           <el-form-item label="高考分数">
             <el-input v-model.number="profile.score" type="number" style="width: 150px" placeholder="选填，仅记录" />
           </el-form-item>
@@ -354,6 +405,20 @@ onMounted(async () => {
         </div>
       </el-form>
     </el-card>
+
+    <!-- P5 偏好最小版：常显偏好条，即时生效（同档内重排 + 学费代理过滤，不改变分档） -->
+    <div class="pref-bar">
+      <span class="pref-bar__label">偏好</span>
+      <el-radio-group v-model="profile.pref_sort" size="small" @change="runMatch(true)">
+        <el-radio-button value="certainty">确定性优先</el-radio-button>
+        <el-radio-button value="level">院校层次优先</el-radio-button>
+        <el-radio-button value="city">城市分级优先</el-radio-button>
+      </el-radio-group>
+      <el-checkbox v-model="profile.tuition_cap" @change="runMatch(true)">
+        学费 ≤2 万/年（自动排除中外合作办学等高学费项目）
+      </el-checkbox>
+      <span class="pref-bar__hint">仅影响同档内排序与过滤，不改变冲/稳/保判定</span>
+    </div>
 
     <el-alert v-if="error" type="error" :title="error" show-icon :closable="false" class="card" />
 
@@ -377,6 +442,22 @@ onMounted(async () => {
             <span class="chip__hint">{{ RISK_HINT[r.key] }}</span>
           </button>
         </el-tooltip>
+      </div>
+
+      <!-- P1 区间模式：乐观视角（位次下界）各档计数 -->
+      <div v-if="data.interval && data.totals_lo" class="risk-chips risk-chips--lo">
+        <span class="chips-cap">乐观视角（位次 {{ data.interval.lo.toLocaleString() }}）</span>
+        <button
+          v-for="r in RISKS"
+          :key="'lo-' + r.key"
+          class="chip chip--mini"
+          :class="'chip--' + r.type"
+          disabled
+        >
+          <span class="chip__label">{{ r.label }}</span>
+          <span class="chip__num">{{ data.totals_lo[r.key] }}</span>
+        </button>
+        <span class="chips-cap chips-cap--note">上方主计数为悲观视角（位次 {{ data.interval.hi.toLocaleString() }}），表格分档亦按悲观视角</span>
       </div>
 
       <!-- 批次数据口径（D4）：每条结果所处的发布环境 -->
@@ -581,13 +662,13 @@ onMounted(async () => {
           <el-table-column label="省份/城市" min-width="120">
             <template #default="{ row }">{{ row.province }}{{ row.city ? '·' + row.city : '' }}</template>
           </el-table-column>
-          <el-table-column label="近年最低位次（2026）" width="130" align="right">
+          <el-table-column label="最难年 / 最近年位次" width="150" align="right">
             <template #header>
-              <el-tooltip content="2026 年该单元录取最低分对应的全省位次：数字越大，表示当年越容易录。" placement="top">
-                <span class="th-help">近年最低位次（2026）</span>
+              <el-tooltip content="最难年＝历史最难一年的门槛位次（冲/稳/保的分档基准，保守口径）；最近年＝2026 年门槛。两者差距大＝门槛断崖变易，分档从严按最难年。" placement="top">
+                <span class="th-help">最难年 / 最近年位次</span>
               </el-tooltip>
             </template>
-            <template #default="{ row }"><span class="tnum">{{ row.last_year_rank?.toLocaleString() }}</span></template>
+            <template #default="{ row }"><span class="tnum">{{ row.best_rank?.toLocaleString() }} / {{ row.last_year_rank?.toLocaleString() ?? '—' }}</span></template>
           </el-table-column>
           <el-table-column label="最好/最差/中位" align="right" min-width="170">
             <template #header>
@@ -612,7 +693,17 @@ onMounted(async () => {
           <el-table-column label="依据" min-width="240" show-overflow-tooltip>
             <template #default="{ row }">
               <span :class="['risk-dot','risk-dot--' + riskType(row.risk)]"></span>
+              <el-tag v-if="row.risk === '保' && row.safe_band" size="small" effect="plain"
+                :type="row.safe_band === '标准保底' ? 'success' : row.safe_band === '极稳垫底' ? 'info' : 'warning'">{{ row.safe_band }}</el-tag>
+              <el-tag v-if="row.over_reach" size="small" type="danger" effect="plain">超冲</el-tag>
               {{ row.risk_reason }}
+              <el-tooltip
+                v-if="data.interval && row.risk_lo && row.risk_lo !== row.risk"
+                content="若你的位次落在估计区间的乐观一端（下界），该单元会判为此档"
+                placement="top"
+              >
+                <el-tag :type="riskType(row.risk_lo)" size="small" effect="plain" class="flag-tag">乐观 {{ row.risk_lo }}</el-tag>
+              </el-tooltip>
               <el-tag v-if="row.warning" type="warning" size="small" effect="plain">数据不足</el-tag>
             </template>
           </el-table-column>
@@ -706,6 +797,20 @@ onMounted(async () => {
 .profile-bar__seg--year { background: var(--color-text); color: #fff; font-weight: 600; }
 .profile-bar__ref { font-size: var(--text-xs); color: var(--color-text-muted); }
 
+.pref-bar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  padding: var(--space-2) var(--space-3);
+  margin-bottom: var(--space-4);
+  background: var(--color-surface, #fff);
+  border: 1px solid var(--color-border, var(--el-border-color-lighter));
+  border-radius: var(--radius-md, 8px);
+}
+.pref-bar__label { font-size: var(--text-sm); font-weight: 600; color: var(--color-text); }
+.pref-bar__hint { font-size: var(--text-xs); color: var(--color-text-muted); margin-left: auto; }
+
 .school-link { color: var(--color-primary); cursor: pointer; }
 .school-link:hover { text-decoration: underline; }
 .major-link { color: var(--color-primary); cursor: pointer; }
@@ -713,6 +818,10 @@ onMounted(async () => {
 
 .chip__hint { font-size: var(--text-xs); color: var(--color-text-muted); }
 .risk-chips { display: flex; flex-wrap: wrap; gap: var(--space-3); margin-bottom: var(--space-4); }
+.risk-chips--lo { align-items: center; }
+.chips-cap { font-size: var(--text-xs); color: var(--color-text-secondary); font-weight: 600; }
+.chips-cap--note { color: var(--color-text-muted); font-weight: 400; }
+.chip--mini { padding: 2px var(--space-3); cursor: default; }
 .chip {
   display: flex; align-items: center; gap: var(--space-2);
   padding: var(--space-2) var(--space-4); border-radius: 999px;

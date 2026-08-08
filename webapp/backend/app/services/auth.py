@@ -61,3 +61,17 @@ async def current_user(
     if user is None:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "用户不存在")
     return user
+
+
+async def optional_user(
+    cred: HTTPAuthorizationCredentials = Depends(_bearer),
+):
+    """FastAPI 依赖（匿名优先 P3/P4）：有合法 token 则返回用户行，否则返回 None。
+    用于「匿名可用、登录则关联账号」的接口（如录取结果回填）。"""
+    if cred is None or not cred.credentials:
+        return None
+    try:
+        uid = decode_token(cred.credentials)
+    except jwt.PyJWTError:
+        return None
+    return await user_db.get_user_by_id(uid)

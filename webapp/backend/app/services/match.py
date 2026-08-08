@@ -44,9 +44,24 @@ MATCH_CONFIG = {
     "high_vol_abs": 2000,
     # 断档判定：最差年份位次 > 中位 * break_multiplier
     "break_multiplier": 1.6,
+    # ---- 冲稳保边界治理（第一性原理 + 行业经验收敛，docs/strategy-chong-wen-bao.md）----
+    # 保底子档分界：best <= R×1.5 为标准保底（行业「低于你 10~15%」主力保底的扩展带），
+    # (R×1.5, R×3] 为极稳垫底（稳妥型方案的垫底位），再深为过深。
+    "safe_band_core": 1.5,
+    # 过深保底：保护在 best≈2R 处饱和（回测：门槛需年际改善 >100% 才会滑到拒绝你，
+    # 而年际变动 P90≈31%、≥50% 仅 4.7%），行业最深的「极稳」也只到 ~30%，
+    # 故 best > R×3 标记 over_safe：不增加安全性，只消耗 112 志愿配额。
+    "over_safe_ratio": 3,
+    # 超冲：历史门槛好于考生位次 20% 以上（best < R×0.8）。行业冲刺带为
+    # 高于自身 5~10%，0.8 作为可执行冲刺的上界，再远基本只消耗槽位。
+    "over_reach_ratio": 0.8,
 }
 
 RISK_ORDER = ["保", "稳", "冲", "高波动", "数据不足"]
+
+# P5 偏好最小版：同档内重排依据（仅改展示顺序，不改资格与分档）
+CITY_TIER_ORDER = ["一线", "新一线", "二线", "三线", "四线", "五线"]
+PREF_SORT_OPTIONS = {"certainty", "level", "city"}
 
 # A4 批次别名归一（仅用于跨年单元合并，展示仍用原始批次名，不改数据）：
 # 2026 本科提前批拆为 A/B 段后，与 2025「本科提前批」为同一批次概念。
@@ -142,6 +157,32 @@ def _build_unit_key(school_code, major_code, major_name, batch):
     return (school_code, mkey, _normalize_batch(batch))
 
 
+def _over_safe(risk: str, best_rank, R: int, cfg: dict) -> bool:
+    """过深保底：保档且历史最难年门槛超过考生位次 over_safe_ratio 倍。
+    保护在 ~2R 处饱和，过深不增加安全性，只消耗志愿额度。"""
+    return (risk == "保" and best_rank is not None and R > 0
+            and best_rank > R * cfg["over_safe_ratio"])
+
+
+def _over_reach(risk: str, best_rank, R: int, cfg: dict) -> bool:
+    """超冲：冲档且历史门槛好于考生位次超过 (1-over_reach_ratio)，
+    超出行业冲刺带（5~10%）过多，基本只消耗槽位。"""
+    return (risk == "冲" and best_rank is not None and R > 0
+            and best_rank < R * cfg["over_reach_ratio"])
+
+
+def _safe_band(risk: str, best_rank, R: int, cfg: dict):
+    """保档子档：标准保底（保护接近饱和且真会去读）/ 极稳垫底（少量跨档兑底）/
+    过深保底（槽位浪费）；非保档返回 None。"""
+    if risk != "保" or best_rank is None or R <= 0:
+        return None
+    if best_rank <= R * cfg["safe_band_core"]:
+        return "标准保底"
+    if best_rank <= R * cfg["over_safe_ratio"]:
+        return "极稳垫底"
+    return "过深保底"
+
+
 def _classify(unit: dict, R: int, cfg: dict):
     """返回 (risk, reason)。区间语言：分档是对明年的区间判断，不是对历史的事实陈述（A1）。"""
     n = unit["n_years"]
@@ -189,6 +230,14 @@ def _classify(unit: dict, R: int, cfg: dict):
             f"你的位次 {R} 位于历史门槛区间 [{best}, {worst}] 之外（落后最宽松端 {R - worst} 名），"
             f"仅当明年门槛大幅放宽时才有可能，属高风险冲刺。")
 
+    # 断崖变易单元：最近年门槛明显宽于最难年 → 点明「去年宽松不作数」，
+    # 解释为何「看起来领先很多却只判稳」
+    if base == "稳":
+        last = unit.get("last_year_rank")
+        if last is not None and last > best * 1.3:
+            reason += (f" 注意：最近年门槛 {last} 明显宽于历史最难年 {best}，去年宽松不代表明年；"
+                       "若门槛回归难年水平，当前领先将不成立，故不能计「保」。")
+
     if unit["break_detected"]:
         reason += " 注意：存在年份断档（位次大幅跳变），历史参考性下降。"
     if single:
@@ -198,6 +247,15 @@ def _classify(unit: dict, R: int, cfg: dict):
 
 def _build_candidate(unit: dict, R: int, cfg: dict):
     risk, reason = _classify(unit, R, cfg)
+    over_safe = _over_safe(risk, unit["best_rank"], R, cfg)
+    over_reach = _over_reach(risk, unit["best_rank"], R, cfg)
+    if over_safe:
+        reason += (f"（注意：历史最难年门槛 {unit['best_rank']} 约为你的位次 {R} 的 "
+                   f"{unit['best_rank'] // R} 倍——保护在 2 倍左右已饱和，过深不增加安全性，"
+                   "只消耗志愿额度，请审慎占用槽位。）")
+    if over_reach:
+        reason += (f"（注意：历史门槛 {unit['best_rank']} 好于你的位次 {R} 超过 20%，差距过大，"
+                   "需明年门槛大幅回落才有机会，基本只消耗槽位，建议仅作表头梦想位。）")
     last = unit["last_year_rank"]
     rank_diff_last = (R - last) if last is not None else None
     if risk == "数据不足":
@@ -218,6 +276,10 @@ def _build_candidate(unit: dict, R: int, cfg: dict):
         "level": unit["level"],
         "nature": unit["nature"],
         "type": unit["type"],
+        # P5 同档内重排用：院校层次优先级（985>211>双一流>其他）与城市分级
+        "school_tier": (0 if unit.get("is_985") else 1 if unit.get("is_211")
+                        else 2 if unit.get("is_dfc") else 3),
+        "city_tier": unit.get("city_tier"),
         "flags": unit["flags"],
         "n_years": unit["n_years"],
         "has_both_years": unit["has_both_years"],
@@ -234,6 +296,10 @@ def _build_candidate(unit: dict, R: int, cfg: dict):
         "break_detected": unit["break_detected"],
         "risk": risk,
         "risk_reason": reason,
+        # 冲稳保边界治理：过深保底/超冲标记 + 保档子档（展示与策略层，不改五档资格判定）
+        "over_safe": over_safe,
+        "over_reach": over_reach,
+        "safe_band": _safe_band(risk, unit["best_rank"], R, cfg),
         "safe_line": int(unit["best_rank"] * cfg["safe_margin"]) if unit["best_rank"] else None,
         "rank_diff_last": rank_diff_last,
         "warning": warning,
@@ -268,9 +334,11 @@ async def _prepare_candidates(
     rows = await db.fetch_all(
         """SELECT a.year, a.school_code, a.school_name, a.major_code, a.major_name,
                   a.batch, a.lowest_rank, a.lowest_score, a.flags,
-                  p.province, p.city, p.level, p.nature, p.type
+                  p.province, p.city, p.level, p.nature, p.type,
+                  p.is_985, p.is_211, p.is_dfc, ct.tier
            FROM admission_scores a
            LEFT JOIN school_profiles p ON a.school_code = p.code
+           LEFT JOIN cities ct ON p.city = ct.city
            WHERE a.category = %s AND a.subject = %s AND a.batch = ANY(%s)
              AND a.is_collection = FALSE
              AND a.score_kind = '投档最低分'
@@ -283,6 +351,7 @@ async def _prepare_candidates(
     for (
         y, sc, sn, mc, mn, bt, lr, lscore, fl,
         prov, cty, lvl, nat, typ,
+        is985, is211, isdfc, ctier,
     ) in rows:
         key = _build_unit_key(sc, mc, mn, bt)
         u = units.get(key)
@@ -294,6 +363,8 @@ async def _prepare_candidates(
                 "batch": batch if _normalize_batch(bt) == _normalize_batch(batch) else bt,
                 "province": prov, "city": cty, "level": lvl,
                 "nature": nat, "type": typ,
+                "is_985": is985, "is_211": is211, "is_dfc": isdfc,
+                "city_tier": ctier,
                 "years": [], "ranks": [], "yearly": [], "scores": {},
                 "rank_years": set(),
                 "flags": set(),
@@ -421,14 +492,40 @@ async def _prepare_candidates(
     return filtered, candidates, excluded_by_subject, subjreq_loaded
 
 
+def _risk_at(c: dict, R: int, cfg: dict):
+    """同一候选在另一考生位次下重新分档（A3 试算 / P1 区间模式共用）。"""
+    u = {"n_years": c["n_years"], "best_rank": c["best_rank"],
+         "worst_rank": c["worst_rank"], "median_rank": c["median_rank"],
+         "span": c["span"], "break_detected": c["break_detected"]}
+    return _classify(u, R, cfg)
+
+
+def _pref_sort_key(c: dict, pref_sort: Optional[str]):
+    """P5 排序键：风险档优先不变；同档内按偏好重排。
+    接近度 = |位次差|（不带符号）：带符号 diff 在保档恒负、冲档恒正，
+    升序会让保档最深的垫底校排在最前，与「最接近匹配」直觉相反。
+    certainty（默认）＝最接近匹配原则：同档内门槛最贴近你位次的单元靠前
+    （保档即「最好的保底」，冲档即「最现实的冲刺」），同距离时院校层次高者靠前；
+    level＝院校层次优先（985>211>双一流），接近度为次键；
+    city＝城市分级优先（一线→五线），接近度为次键。"""
+    diff = c["rank_diff_last"] if c["rank_diff_last"] is not None else 1 << 30
+    near = abs(diff)
+    head = RISK_ORDER.index(c["risk"])
+    tier = c.get("school_tier", 9)
+    if pref_sort == "level":
+        return (head, tier, near)
+    if pref_sort == "city":
+        t = c.get("city_tier")
+        tidx = CITY_TIER_ORDER.index(t) if t in CITY_TIER_ORDER else 99
+        return (head, tidx, near)
+    return (head, near, tier, diff)
+
+
 def _totals_at_rank(candidates, R: int, cfg: dict):
     """同一候选集在不同考生位次下重新分档计数（A3 敏感度一键试算）。"""
     totals = {k: 0 for k in RISK_ORDER}
     for c in candidates:
-        u = {"n_years": c["n_years"], "best_rank": c["best_rank"],
-             "worst_rank": c["worst_rank"], "median_rank": c["median_rank"],
-             "span": c["span"], "break_detected": c["break_detected"]}
-        risk, _ = _classify(u, R, cfg)
+        risk, _ = _risk_at(c, R, cfg)
         totals[risk] += 1
     totals["total"] = len(candidates)
     return totals
@@ -490,6 +587,8 @@ async def match(
     batch: str,
     rank: Optional[int] = None,
     score: Optional[int] = None,
+    rank_lo: Optional[int] = None,
+    rank_hi: Optional[int] = None,
     province: Optional[str] = None,
     city: Optional[str] = None,
     level: Optional[str] = None,
@@ -500,12 +599,30 @@ async def match(
     risk: Optional[str] = None,
     exclude_flags: Optional[list] = None,
     electives: Optional[list] = None,
+    pref_sort: Optional[str] = None,
     page: int = 1,
     page_size: int = 30,
     cfg: Optional[dict] = None,
 ):
-    """普通类智能匹配主入口。"""
+    """普通类智能匹配主入口。P1：rank_lo/rank_hi 给定时按区间模式（备考期估位）；
+    P5：pref_sort 只影响同档内展示顺序（certainty/level/city）。"""
     cfg = cfg or MATCH_CONFIG
+    if pref_sort and pref_sort not in PREF_SORT_OPTIONS:
+        pref_sort = None
+
+    # ---------- P1 备考期模式：位次区间 → 乐观/悲观双档 ----------
+    # lo（位次数字小＝更好）为乐观情景，hi 为悲观情景；主判定用 hi（保守）。
+    interval = None
+    if rank_lo is not None or rank_hi is not None:
+        if (rank_lo is None or rank_hi is None or rank_lo <= 0 or rank_hi <= 0
+                or rank_lo > rank_hi):
+            return {
+                "error": "位次区间无效：请同时填写上下界（正整数），且下界 ≤ 上界。",
+                "examinee": {"year": year, "category": category, "subject": subject,
+                             "batch": batch, "score": score, "rank": rank},
+            }
+        interval = {"lo": rank_lo, "hi": rank_hi}
+        rank = rank_hi
 
     # ---------- 第一步：输入校验 ----------
     rank = await _resolve_rank(year, category, subject, rank, score)
@@ -531,6 +648,8 @@ async def match(
     for c in filtered:
         totals[c["risk"]] += 1
     totals["total"] = len(filtered)
+    # P1 区间模式：乐观情景（下界 lo）的分档计数
+    totals_lo = _totals_at_rank(filtered, interval["lo"], cfg) if interval else None
 
     # 风险过滤前的匹配结果快照（供城市 facet 使用，只含实际出现的城市）
     matched_filtered = filtered
@@ -539,15 +658,19 @@ async def match(
     if risk:
         filtered = [c for c in filtered if c["risk"] == risk]
 
-    # 排序：风险优先（保>稳>冲>高波动>数据不足），同档内按位次差升序（最接近者靠前）
-    filtered.sort(key=lambda c: (RISK_ORDER.index(c["risk"]),
-                                 c["rank_diff_last"] if c["rank_diff_last"] is not None else 1 << 30))
+    # 排序：风险优先（保>稳>冲>高波动>数据不足）；同档内默认按位次差升序，
+    # P5 偏好重排：level＝院校层次优先，city＝城市分级优先
+    filtered.sort(key=lambda c: _pref_sort_key(c, pref_sort))
 
     # 分页
     total = len(filtered)
     page = max(1, page)
     start = (page - 1) * page_size
     items = filtered[start:start + page_size]
+    # P1 区间模式：每条结果附乐观情景分档（主判定为悲观 hi）
+    if interval:
+        for c in items:
+            c["risk_lo"], c["risk_reason_lo"] = _risk_at(c, interval["lo"], cfg)
 
     # 聚合 facet（供前端下拉）
     # - 省/层次/性质/类型 基于全量候选（保持下拉稳定可选）
@@ -571,12 +694,25 @@ async def match(
     version = await get_data_version()
 
     # ---------- 批次发布状态上下文（D4）：让每条结果知道自己处在什么数据环境下 ----------
+    # 发布登记描述的是「用于对比的历史录取年」（登记表只有 2025/2026 录取年的进度），
+    # 考生年（如 2027）本身尚未录取、无登记，不能拿考生年去查；
+    # 先取本批次库内实际存在的历史录取年，再按这些年份取发布进度。
+    # 同时做别名展开（A4）：2026 提前批登记在 A/B 段名下，
+    # 合并视图查「本科提前批」时也能取到发布登记，避免「未登记」误报。
+    hist_years = await db.fetch_all(
+        """SELECT DISTINCT year FROM admission_scores
+           WHERE category=%s AND subject=%s AND batch = ANY(%s)
+             AND is_collection = FALSE AND score_kind = '投档最低分'
+           ORDER BY year""",
+        (category, subject, _batch_variants(batch)),
+    )
+    years = [r[0] for r in hist_years]
     pub = await db.fetch_all(
-        """SELECT stage, status, note, official_published_at
+        """SELECT DISTINCT year, stage, status, note, official_published_at
            FROM admission_publication_status
-           WHERE year=%s AND category=%s AND subject=%s AND batch=%s
-           ORDER BY stage""",
-        (year, category, subject, batch),
+           WHERE year = ANY(%s) AND category=%s AND subject=%s AND batch = ANY(%s)
+           ORDER BY year, stage""",
+        (years, category, subject, _batch_variants(batch)),
     )
     batch_context = {
         "batch": batch,
@@ -586,8 +722,8 @@ async def match(
             "「录取最低分」仅提前批等批次发布；且「专业+学校」志愿无校内专业调剂，"
             "投档线与录取线差距小，可直接作为门槛参考。"),
         "publication": [
-            {"stage": r[0], "status": r[1], "note": r[2],
-             "official_published_at": str(r[3]) if r[3] else None}
+            {"year": r[0], "stage": r[1], "status": r[2], "note": r[3],
+             "official_published_at": str(r[4]) if r[4] else None}
             for r in pub
         ],
     }
@@ -600,9 +736,13 @@ async def match(
         "examinee": {
             "year": year, "category": category, "subject": subject,
             "batch": batch, "score": score, "rank": rank,
+            "rank_lo": interval["lo"] if interval else None,
+            "rank_hi": interval["hi"] if interval else None,
             "electives": electives,
         },
+        "interval": interval,
         "totals": totals,
+        "totals_lo": totals_lo,
         "excluded_by_subject": excluded_by_subject,
         "subject_requirements_loaded": subjreq_loaded,
         "classification_note": CLASSIFICATION_NOTE,

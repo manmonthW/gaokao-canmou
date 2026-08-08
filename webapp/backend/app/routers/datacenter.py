@@ -52,3 +52,17 @@ async def source_files():
 async def publication_status():
     """批次发布状态（区分无数据 vs 待发布）。"""
     return await svc.publication_status()
+
+
+@router.get("/collection-reference")
+async def collection_reference(category: str = Query(...),
+                               subject: Optional[str] = Query(None),
+                               batch: Optional[str] = Query(None),
+                               rank: Optional[int] = Query(None, ge=1),
+                               window: float = Query(0.3, ge=0.05, le=0.8,
+                                                     description="位次带宽度：±window，默认 ±30%")):
+    """P6 往年征集参考（最坏情况视图）：位次带内曾进入征集的院校专业；
+    征集数据不参与智能匹配，仅作滑档后的真实世界参考。"""
+    return await svc.collection_reference(category, subject=subject,
+                                          batch=batch, rank=rank,
+                                          window=window)

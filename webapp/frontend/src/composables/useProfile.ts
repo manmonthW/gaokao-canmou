@@ -19,6 +19,11 @@ const defaultProfile: ExamineeProfile = {
   score: null,
   rank: null,
   electives: [],
+  rank_mode: 'exact',
+  rank_lo: null,
+  rank_hi: null,
+  pref_sort: 'certainty',
+  tuition_cap: false,
 }
 
 function load(): ExamineeProfile {

@@ -2,7 +2,7 @@
 import { ref, onMounted, watch, computed } from 'vue'
 import { useRoute } from 'vue-router'
 import { api } from '@/api/client'
-import type { DataStatusMatrix } from '@/types'
+import type { DataStatusMatrix, CollectionReference } from '@/types'
 
 const route = useRoute()
 const meta = ref<any>(null)
@@ -38,6 +38,15 @@ const pubStatus = ref<any[]>([])
 
 // 发布矩阵（D4）：官方发布状态 × 库内记录数，暴露时效性缺口
 const matrix = ref<DataStatusMatrix | null>(null)
+
+// 往年征集参考（P6）：滑档后真实存在的安全网，独立入口、明确标注，不参与智能匹配
+const collFilters = ref({
+  category: '普通类',
+  subject: '物理学科类',
+  batch: '',
+  rank: null as number | null,
+})
+const collData = ref<CollectionReference | null>(null)
 
 async function guard(fn: () => Promise<void>) {
   loading.value = true
@@ -92,6 +101,16 @@ function loadPub() {
 function loadMatrix() {
   return guard(async () => { matrix.value = await api.dataStatusMatrix() })
 }
+function loadColl() {
+  return guard(async () => {
+    collData.value = await api.collectionReference({
+      category: collFilters.value.category,
+      subject: collFilters.value.subject || undefined,
+      batch: collFilters.value.batch || undefined,
+      rank: collFilters.value.rank || undefined,
+    })
+  })
+}
 
 function onTab(tab: string) {
   if (tab === 'lines' && !lines.value.length) loadLines()
@@ -99,6 +118,7 @@ function onTab(tab: string) {
   if (tab === 'records') loadRec()
   if (tab === 'pub' && !pubStatus.value.length) loadPub()
   if (tab === 'matrix' && !matrix.value) loadMatrix()
+  if (tab === 'collection' && !collData.value) loadColl()
 }
 
 // 原始记录：批次下拉按已选科类联动（数据驱动，来自 meta.batches_by_category）。
@@ -118,6 +138,21 @@ function onRecCategoryChange() {
     recFilters.value.batch = ''
   }
   onRecFilter()
+}
+
+// 征集参考：批次下拉同样按已选类别联动（逻辑与原始记录一致）
+const collBatchOptions = computed<string[]>(() => {
+  const cat = collFilters.value.category
+  const map = meta.value?.batches_by_category
+  if (cat && map && map[cat]) return map[cat]
+  return meta.value?.batches || []
+})
+function onCollCategoryChange() {
+  const opts = collBatchOptions.value
+  if (collFilters.value.batch && !opts.includes(collFilters.value.batch)) {
+    collFilters.value.batch = ''
+  }
+  loadColl()
 }
 
 onMounted(async () => {
@@ -334,6 +369,58 @@ function onRecFilter() { recPage.value = 1; loadRec() }
           </el-table>
         </template>
       </el-tab-pane>
+
+      <!-- 往年征集参考（P6）：最坏情况安全网，明确标注不参与匹配 -->
+      <el-tab-pane label="往年征集参考" name="collection">
+        <el-alert
+          v-if="collData"
+          type="warning"
+          :title="collData.note"
+          show-icon
+          :closable="false"
+          class="coll-alert"
+        />
+        <div class="filters wrap">
+          <el-select v-model="collFilters.category" class="f-sel" @change="onCollCategoryChange()">
+            <el-option v-for="c in (meta?.categories || [])" :key="c" :label="c" :value="c" />
+          </el-select>
+          <el-select v-model="collFilters.subject" placeholder="学科类" clearable class="f-sel" @change="loadColl()">
+            <el-option v-for="s in (meta?.subjects || [])" :key="s" :label="s" :value="s" />
+          </el-select>
+          <el-select v-model="collFilters.batch" placeholder="批次" clearable class="f-sel" @change="loadColl()">
+            <el-option v-for="b in collBatchOptions" :key="b" :label="b" :value="b" />
+          </el-select>
+          <el-input
+            v-model.number="collFilters.rank"
+            type="number"
+            :min="1"
+            placeholder="你的位次（可选）"
+            clearable
+            class="f-q"
+            @keyup.enter="loadColl()"
+          />
+          <el-button type="primary" @click="loadColl()">查询</el-button>
+        </div>
+        <p v-if="collData?.band" class="coll-band">
+          位次带：<span class="tnum">{{ collData.band.lo.toLocaleString() }}</span> –
+          <span class="tnum">{{ collData.band.hi.toLocaleString() }}</span>（你的位次 ±30%），
+          共 {{ collData.items.length }} 条征集记录（最多展示 400 条）
+        </p>
+        <div v-if="collData && !collData.items.length" class="empty">该条件下无征集记录：往年此范围内没有院校专业进入征集，或尚未入库。</div>
+        <el-table v-if="collData && collData.items.length" :data="collData.items" size="small" border fit>
+          <el-table-column prop="year" label="年份" width="80" />
+          <el-table-column prop="batch" label="批次" width="130" />
+          <el-table-column prop="school_name" label="院校" min-width="150" show-overflow-tooltip />
+          <el-table-column prop="major_name" label="专业" min-width="150" show-overflow-tooltip />
+          <el-table-column prop="score_kind" label="类型" width="90" />
+          <el-table-column prop="lowest_score" label="最低分" width="90" align="right">
+            <template #default="{ row }"><span class="tnum" v-if="row.lowest_score != null">{{ row.lowest_score }}</span></template>
+          </el-table-column>
+          <el-table-column prop="lowest_rank" label="最低位次" width="100" align="right">
+            <template #default="{ row }"><span class="tnum" v-if="row.lowest_rank != null">{{ row.lowest_rank.toLocaleString() }}</span></template>
+          </el-table-column>
+        </el-table>
+      </el-tab-pane>
     </el-tabs>
   </div>
 </template>
@@ -352,6 +439,8 @@ function onRecFilter() { recPage.value = 1; loadRec() }
 .tabs :deep(.el-tabs__content) { padding-top: var(--space-2); }
 .matrix-note { color: var(--color-text-secondary); font-size: var(--text-sm); margin: 0 0 var(--space-3); }
 .matrix-sub { margin: var(--space-5) 0 var(--space-2); font-size: var(--text-base); }
+.coll-alert { margin-bottom: var(--space-4); }
+.coll-band { color: var(--color-text-secondary); font-size: var(--text-sm); margin: 0 0 var(--space-3); }
 :deep(.matrix-gap) td { background: var(--el-color-danger-light-9) !important; }
 .empty { padding: var(--space-8); text-align: center; color: var(--color-text-muted); }
 </style>

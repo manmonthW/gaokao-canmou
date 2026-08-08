@@ -5,10 +5,12 @@ import type { AuthUser } from '@/types'
 /**
  * 认证状态（全局单例）+ 用户数据云同步。
  *
- * MVP 策略（与产品约定一致）：
+ * 匿名优先策略（P3，与 development-spec §9.3 / product-plan MVP 约定一致）：
+ *  - 查询/定位/匹配/工作台全程无需登录，数据存 localStorage；
  *  - token 存 localStorage（Bearer 头）；应用启动时恢复并校验；
- *  - 未登录仍可用（数据在 localStorage），登录后把本地方案上传服务端，
- *    之后以服务端为准，并在本地变化时防抖回写服务端。
+ *  - 登录是「跨设备同步 + 云端保存」的增值入口：
+ *    云端为空 → 把本机数据推上去；云端非空 → 以云端为准；
+ *    之后本地变化时防抖回写服务端。
  */
 
 const TOKEN_KEY = 'ln-zhiyuan-token'
@@ -80,9 +82,9 @@ let restorePromise: Promise<void> | null = null
 
 export function useAuth() {
   /**
-   * 应用启动：校验 token 并加载该账号云端数据。
-   * 登录必需模型：未登录（无 token / token 失效）时清空本地遗留数据，
-   * 保证「未登录 = 无数据」。单飞（single-flight），路由守卫可 await。
+   * 应用启动：校验 token 并加载该账号云端数据。单飞（single-flight），路由守卫可 await。
+   * 匿名优先（P3）：无 token 时保留本机数据（匿名用户的档案/方案就在本机）；
+   * 仅当 token 失效（数据属于已登录账号）时才清空本地。
    */
   function restore(): Promise<void> {
     if (ready.value) return Promise.resolve()
@@ -95,19 +97,19 @@ export function useAuth() {
           if (data && Object.keys(data).length > 0) {
             applyToLocal(data)
           } else {
-            // 云端为空：清掉可能残留的本地数据，避免展示旧数据
-            for (const k of SYNC_KEYS) localStorage.removeItem(k)
+            // 云端为空：本机若有数据则推上去（云端以本机为准），否则保持空
+            if (Object.keys(snapshotLocal()).length > 0) {
+              await pushData()
+            }
           }
           window.dispatchEvent(new Event('ln-userdata-restored'))
         } catch {
-          // token 失效/网络异常：退回未登录并清空本地
+          // token 失效/网络异常：退回匿名并清空属于该账号的本地数据
           clearSession()
           clearLocalUserData()
         }
-      } else {
-        // 无 token：确保本地无遗留用户数据
-        clearLocalUserData()
       }
+      // 无 token：匿名使用，本机数据原样保留
       ready.value = true
     })()
     return restorePromise
@@ -122,13 +124,18 @@ export function useAuth() {
 
   async function login(loginId: string, password: string) {
     const res = await api.login({ login: loginId, password })
-    // 清掉任何遗留本地数据，仅加载该账号云端数据
+    // 匿名优先合并（P3）：先快照本机匿名数据；云端非空 → 以云端为准，
+    // 云端为空 → 保留本机数据并推上去，不丢匿名期间的劳动成果。
+    const localSnap = snapshotLocal()
     for (const k of SYNC_KEYS) localStorage.removeItem(k)
     setSession(res.token, res.user)
     try {
       const { data } = await api.getUserData()
       if (data && Object.keys(data).length > 0) {
         applyToLocal(data)
+      } else if (Object.keys(localSnap).length > 0) {
+        applyToLocal(localSnap)
+        await pushData()
       }
       window.dispatchEvent(new Event('ln-userdata-restored'))
     } catch {

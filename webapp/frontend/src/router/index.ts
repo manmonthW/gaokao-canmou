@@ -28,7 +28,8 @@ const router = createRouter({
   routes,
 })
 
-// 全局守卫：登录必需。未登录访问非 public 路由 → 跳登录页。
+// 全局守卫：匿名优先（P3）。查询/定位/匹配/工作台全程无需登录，
+// 数据存本机浏览器；登录仅作为「跨设备同步 + 云端保存」的增值入口。
 router.beforeEach(async (to) => {
   const { useAuth } = await import('@/composables/useAuth')
   const auth = useAuth()
@@ -38,9 +39,6 @@ router.beforeEach(async (to) => {
     // 已登录时访问登录页 → 回首页
     if (auth.isLoggedIn.value) return { path: '/' }
     return true
-  }
-  if (!auth.isLoggedIn.value) {
-    return { path: '/auth', query: { redirect: to.fullPath } }
   }
   return true
 })

@@ -29,6 +29,25 @@ CREATE TABLE IF NOT EXISTS user_data (
     data       TEXT NOT NULL DEFAULT '{}',
     updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
+-- P4 录取结果自愿回填（匿名可用）：系统第一个真实标签集，
+-- 支撑分档阈值校准与概率化展示可行性判断。与只读 PG 分析库物理隔离。
+CREATE TABLE IF NOT EXISTS outcome_feedback (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id         INTEGER REFERENCES users(id) ON DELETE SET NULL,
+    examinee_year   INTEGER NOT NULL,
+    category        TEXT,
+    subject         TEXT,
+    batch           TEXT,
+    examinee_rank   INTEGER,
+    plan_total      INTEGER,
+    outcome         TEXT NOT NULL CHECK (outcome IN ('admitted','slipped','unknown')),
+    admitted_order  INTEGER,
+    admitted_risk   TEXT,
+    admitted_school TEXT,
+    admitted_major  TEXT,
+    note            TEXT,
+    created_at      TEXT NOT NULL DEFAULT (datetime('now'))
+);
 -- 唯一性大小写不敏感（避免 A@x.com 与 a@x.com 重复注册）
 CREATE UNIQUE INDEX IF NOT EXISTS idx_users_email_lower ON users(lower(email));
 CREATE UNIQUE INDEX IF NOT EXISTS idx_users_username_lower ON users(lower(username));
@@ -118,6 +137,46 @@ def _set_data(uid, data_json):
         )
 
 
+# ---------------- P4 录取结果回填（SQLite 侧） ----------------
+
+def _add_feedback(row: dict):
+    with _connect() as conn:
+        cur = conn.execute(
+            """INSERT INTO outcome_feedback (
+                 user_id, examinee_year, category, subject, batch, examinee_rank,
+                 plan_total, outcome, admitted_order, admitted_risk,
+                 admitted_school, admitted_major, note)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (
+                row.get("user_id"), row["examinee_year"], row.get("category"),
+                row.get("subject"), row.get("batch"), row.get("examinee_rank"),
+                row.get("plan_total"), row["outcome"], row.get("admitted_order"),
+                row.get("admitted_risk"), row.get("admitted_school"),
+                row.get("admitted_major"), row.get("note"),
+            ),
+        )
+        return cur.lastrowid
+
+
+def _feedback_summary():
+    with _connect() as conn:
+        total = conn.execute("SELECT COUNT(*) AS n FROM outcome_feedback").fetchone()["n"]
+        by_outcome = {
+            r["outcome"]: r["n"]
+            for r in conn.execute(
+                "SELECT outcome, COUNT(*) AS n FROM outcome_feedback GROUP BY outcome"
+            )
+        }
+        by_risk = {
+            r["admitted_risk"]: r["n"]
+            for r in conn.execute(
+                "SELECT admitted_risk, COUNT(*) AS n FROM outcome_feedback "
+                "WHERE outcome='admitted' AND admitted_risk IS NOT NULL GROUP BY admitted_risk"
+            )
+        }
+        return {"total": total, "by_outcome": by_outcome, "by_admitted_risk": by_risk}
+
+
 # ---------------- 异步包装（供 FastAPI 调用） ----------------
 
 async def create_user(email, username, password_hash):
@@ -150,3 +209,11 @@ async def get_data(uid):
 
 async def set_data(uid, data_json):
     return await run_in_threadpool(_set_data, uid, data_json)
+
+
+async def add_feedback(row: dict):
+    return await run_in_threadpool(_add_feedback, row)
+
+
+async def feedback_summary():
+    return await run_in_threadpool(_feedback_summary)

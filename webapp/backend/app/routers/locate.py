@@ -55,6 +55,19 @@ async def summary(
                                       score=score, rank=rank, batch=batch)
 
 
+@router.get("/estimate-rank")
+async def estimate_rank(
+    category: str = Query(...),
+    subject: str = Query(...),
+    score: int = Query(..., description="模考分数"),
+    mock_line: int = Query(..., description="模考批次线（如学校划定的模考本科线）"),
+    batch: Optional[str] = Query("本科批"),
+):
+    """P1 备考期·线差法估位：模考分 − 模考线 = 线差 → 历史同年线差对应位次（估计区间，非真实位次）。"""
+    return await svc.estimate_rank_by_line_diff(
+        category, subject, score, mock_line, batch=batch or "本科批")
+
+
 @router.get("/rank-context")
 async def rank_context(
     category: str = Query(...),

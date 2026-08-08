@@ -215,6 +215,51 @@ async def rank_context(category, subject, rank, batch=None):
     }
 
 
+async def estimate_rank_by_line_diff(category, subject, score, mock_line, batch="本科批"):
+    """P1 备考期·线差法估位：模考分 − 模考批次线 = 线差；
+    线差 + 各历史年省控线 = 估计分 → 一分一段表反查位次。
+    结果为估计位次区间（非真实位次），UI 必须醒目标注「此为估算」。"""
+    if not score or not mock_line or score <= 0 or mock_line <= 0:
+        return {"error": "请输入模考分数与模考批次线（正整数）。"}
+    line_diff = score - mock_line
+    lt = _line_type(batch) or "本科"
+    yrs = await db.fetch_all(
+        "SELECT year, score FROM batch_control_line "
+        "WHERE category=%s AND subject=%s AND line_type=%s ORDER BY year",
+        (category, subject, lt))
+    if not yrs:
+        return {"error": f"无历史省控线：{category} {subject} {lt}"}
+    per_year = []
+    for yr, line in yrs:
+        est_score = line + line_diff
+        r = await score_to_rank(yr, category, subject, est_score)
+        item = {"year": yr, "line": line, "est_score": est_score}
+        if r.get("found") and r.get("rank"):
+            item["rank"] = r["rank"]
+            item["rank_range"] = r.get("rank_range")
+        elif r.get("found") and r.get("rank_range"):
+            item["rank_range"] = r["rank_range"]
+            item["rank"] = r["rank_range"][1]  # 取更差一端，保守
+        else:
+            item["note"] = r.get("note") or r.get("error")
+        per_year.append(item)
+    ranks = [p["rank"] for p in per_year if p.get("rank")]
+    suggested = None
+    if ranks:
+        # 跨年差异之外再外扩 ±10%，覆盖模考与高考的难度/人群误差
+        suggested = {"lo": max(1, int(min(ranks) * 0.9)),
+                     "hi": int(max(ranks) * 1.1)}
+    return {
+        "category": category, "subject": subject, "batch": batch,
+        "score": score, "mock_line": mock_line, "line_diff": line_diff,
+        "line_type": lt, "per_year": per_year,
+        "suggested_interval": suggested,
+        "note": ("线差法估算：假设「模考分 − 模考线」的相对位置与高考相当，"
+                 "但模考难度与排名人群与高考不同，结果只是备考期估计位次区间，"
+                 "不是真实位次；区间已外扩 ±10% 覆盖模考误差。"),
+    }
+
+
 async def personal_summary(year, category, subject, score=None, rank=None, batch=None):
     if not score and not rank:
         return {"error": "至少需要提供 score 或 rank 之一"}

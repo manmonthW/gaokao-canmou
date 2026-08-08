@@ -51,6 +51,7 @@ export function buildQuery(params: Record<string, unknown>): string {
 
 import type {
   DataStatusResponse,
+  EstimateRankResponse,
   MetaResponse,
   LocateSummary,
   SchoolSummary,
@@ -66,6 +67,7 @@ import type {
   PagedRecords,
   SourceFile,
   PublicationStatus,
+  CollectionReference,
   MatchResponse,
   SensitivityResponse,
   RankContext,
@@ -84,6 +86,8 @@ export const api = {
     getJson<LocateSummary>(`/locate/summary${buildQuery(p)}`),
   rankContext: (p: Record<string, unknown>) =>
     getJson<RankContext>(`/locate/rank-context${buildQuery(p)}`),
+  estimateRank: (p: Record<string, unknown>) =>
+    getJson<EstimateRankResponse>(`/locate/estimate-rank${buildQuery(p)}`),
   searchSchools: (q: string, limit = 20) =>
     getJson<SchoolSummary[]>(`/search/schools${buildQuery({ q, limit })}`),
   searchMajors: (p: Record<string, unknown>) =>
@@ -112,6 +116,9 @@ export const api = {
     getJson<PagedRecords>(`/datacenter/records${buildQuery(p)}`),
   sourceFiles: () => getJson<SourceFile[]>('/datacenter/source-files'),
   publicationStatus: () => getJson<PublicationStatus[]>('/datacenter/publication-status'),
+  // P6 往年征集参考（最坏情况安全网，不参与智能匹配）
+  collectionReference: (p: Record<string, unknown>) =>
+    getJson<CollectionReference>(`/datacenter/collection-reference${buildQuery(p)}`),
   match: (p: Record<string, unknown>) =>
     getJson<MatchResponse>(`/match${buildQuery(p)}`),
   matchSensitivity: (p: Record<string, unknown>) =>
@@ -134,6 +141,11 @@ export const api = {
   getUserData: () => getJson<{ data: Record<string, unknown> }>('/user/data'),
   putUserData: (data: Record<string, unknown>) =>
     sendJson<{ ok: boolean }>('PUT', '/user/data', { data }),
+  // ---- P4 录取结果自愿回填（匿名可用） ----
+  submitFeedback: (payload: Record<string, unknown>) =>
+    sendJson<{ ok?: boolean; id?: number; error?: string }>('POST', '/feedback', payload),
+  feedbackSummary: () =>
+    getJson<{ total: number; by_outcome: Record<string, number>; by_admitted_risk: Record<string, number> }>('/feedback/summary'),
   /** 导出志愿方案 xlsx，返回 Blob */
   exportPlan: async (payload: unknown): Promise<Blob> => {
     const res = await fetch(`${ORIGIN}${PREFIX}/plan/export`, {

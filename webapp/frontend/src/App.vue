@@ -15,8 +15,8 @@ function goAuth() {
 }
 function onLogout() {
   auth.logout()
-  ElMessage.success('已退出登录')
-  router.push('/auth')
+  ElMessage.success('已退出登录，可继续匿名使用（本机数据已清空）')
+  router.push('/')
 }
 
 // 决策主线三步（有序、带状态）
@@ -80,8 +80,8 @@ const library = [
     style: '--icon: var(--el-color-warning); --icon-soft: var(--el-color-warning-light-8)',
   },
 ]
-// 登录页等公开页不显示应用外壳（顶栏 + 步骤条）
-const chromeless = computed(() => route.meta.public === true || !auth.isLoggedIn.value)
+// 登录页等公开页不显示应用外壳（顶栏 + 步骤条）；匿名优先（P3）：匿名也显示外壳
+const chromeless = computed(() => route.meta.public === true)
 </script>
 
 <template>
@@ -133,7 +133,9 @@ const chromeless = computed(() => route.meta.public === true || !auth.isLoggedIn
               </template>
             </el-dropdown>
           </template>
-          <el-button v-else size="small" type="primary" plain @click="goAuth">登录 / 注册</el-button>
+          <el-tooltip v-else content="不登录也能用：数据只存本机浏览器；登录后可跨设备同步" placement="bottom">
+            <el-button size="small" type="primary" plain @click="goAuth">登录 / 注册</el-button>
+          </el-tooltip>
         </div>
       </div>
 

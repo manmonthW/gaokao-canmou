@@ -127,3 +127,49 @@ async def publication_status():
          "source_url": r[8], "note": r[9]}
         for r in rows
     ]
+
+
+async def collection_reference(category, subject=None, batch=None,
+                               rank=None, window=0.3):
+    """P6 往年征集参考：你的位次带内曾有哪些院校专业进入征集志愿。
+
+    定位是「最坏情况参考」：征集是滑档后真实存在的安全网，帮考生理解
+    滑档后的真实世界；征集数据**绝不进入**智能匹配（match 始终
+    is_collection=FALSE），两者不冲突。给位次时只看 ±window 位次带内，
+    不给位次则返回该批次全部征集记录（限量）。
+    """
+    window = min(max(window, 0.05), 0.8)
+    where = "WHERE is_collection=TRUE AND category=%s"
+    params = [category]
+    if subject:
+        where += " AND subject=%s"; params.append(subject)
+    if batch:
+        where += " AND batch=%s"; params.append(batch)
+    band = None
+    if rank and rank > 0:
+        band = {"lo": max(1, int(rank * (1 - window))),
+                "hi": int(rank * (1 + window))}
+        where += " AND lowest_rank BETWEEN %s AND %s"
+        params.extend([band["lo"], band["hi"]])
+    rows = await db.fetch_all(
+        f"""SELECT year, batch, school_name, major_name, score_kind,
+                   lowest_score, lowest_rank
+            FROM admission_scores {where}
+            ORDER BY year DESC, lowest_rank NULLS LAST, school_name
+            LIMIT 400""",
+        params,
+    )
+    return {
+        "category": category, "subject": subject, "batch": batch,
+        "rank": rank, "band": band,
+        "items": [
+            {"year": r[0], "batch": r[1], "school_name": r[2],
+             "major_name": r[3], "score_kind": r[4],
+             "lowest_score": float(r[5]) if r[5] is not None else None,
+             "lowest_rank": r[6]}
+            for r in rows
+        ],
+        "note": ("征集志愿是常规投档未录满后的补充录取，属于「最坏情况参考」，"
+                 "不代表这些院校专业明年的正常录取水平；征集数据不参与本站智能匹配，"
+                 "请以省招考办官方征集公告为准。"),
+    }

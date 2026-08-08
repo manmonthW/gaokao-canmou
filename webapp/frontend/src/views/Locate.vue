@@ -1,9 +1,10 @@
 <script setup lang="ts">
 import { ref, onMounted, computed } from 'vue'
 import { useRouter } from 'vue-router'
+import { ElMessage } from 'element-plus'
 import { api } from '@/api/client'
 import { useProfile, EXAMINEE_YEAR } from '@/composables/useProfile'
-import type { RankContext } from '@/types'
+import type { RankContext, EstimateRankResponse } from '@/types'
 import DataStatusBanner from '@/components/DataStatusBanner.vue'
 import StepGuide from '@/components/StepGuide.vue'
 
@@ -22,8 +23,16 @@ onMounted(async () => {
 async function onSubmit() {
   error.value = null
   result.value = null
-  if (!profile.value.rank || profile.value.rank <= 0) {
-    error.value = '请填写你的全省位次（正整数）——它是本工具的定位锚点。'
+  const isInterval = profile.value.rank_mode === 'interval'
+  if (isInterval) {
+    if (!profile.value.rank_lo || !profile.value.rank_hi ||
+        profile.value.rank_lo <= 0 || profile.value.rank_hi <= 0 ||
+        profile.value.rank_lo > profile.value.rank_hi) {
+      error.value = '请填写估计位次区间：上下界均为正整数，且下界 ≤ 上界。'
+      return
+    }
+  } else if (!profile.value.rank || profile.value.rank <= 0) {
+    error.value = '请填写你的全省位次（正整数）——它是本工具的定位锚点；备考期可切换「估计位次区间」或用下方线差法估算。'
     return
   }
   loading.value = true
@@ -31,7 +40,7 @@ async function onSubmit() {
     result.value = await api.rankContext({
       category: profile.value.category,
       subject: profile.value.subject,
-      rank: profile.value.rank,
+      rank: isInterval ? profile.value.rank_hi : profile.value.rank,
       batch: profile.value.batch || undefined,
     })
     if (result.value?.error) error.value = result.value.error
@@ -40,6 +49,39 @@ async function onSubmit() {
   } finally {
     loading.value = false
   }
+}
+
+// ---------- P1 备考期：线差法估位（模考分 → 线差 → 历史同年线差对应位次） ----------
+const est = ref<EstimateRankResponse | null>(null)
+const estLoading = ref(false)
+const estScore = ref<number | null>(null)
+const estLine = ref<number | null>(null)
+async function runEstimate() {
+  error.value = null
+  est.value = null
+  estLoading.value = true
+  try {
+    est.value = await api.estimateRank({
+      category: profile.value.category,
+      subject: profile.value.subject,
+      batch: profile.value.batch || '本科批',
+      score: estScore.value ?? undefined,
+      mock_line: estLine.value ?? undefined,
+    })
+    if (est.value?.error) error.value = est.value.error
+  } catch (e) {
+    error.value = (e as Error).message
+  } finally {
+    estLoading.value = false
+  }
+}
+function applyEstimate() {
+  const s = est.value?.suggested_interval
+  if (!s) return
+  profile.value.rank_mode = 'interval'
+  profile.value.rank_lo = s.lo
+  profile.value.rank_hi = s.hi
+  ElMessage.success(`已采用估计位次区间 ${s.lo.toLocaleString()} – ${s.hi.toLocaleString()}`)
 }
 
 function goMatch() {
@@ -82,9 +124,23 @@ const refYearsText = computed(() =>
           </el-form-item>
         </div>
         <div class="form__row">
-          <el-form-item label="全省位次" required>
+          <el-form-item label="位次类型">
+            <el-radio-group v-model="profile.rank_mode">
+              <el-radio value="exact">出分后·精确位次</el-radio>
+              <el-radio value="interval">备考期·估计位次区间</el-radio>
+            </el-radio-group>
+          </el-form-item>
+          <el-form-item v-if="profile.rank_mode !== 'interval'" label="全省位次" required>
             <el-input v-model.number="profile.rank" type="number" style="width: 180px" placeholder="必填，如 13601" />
           </el-form-item>
+          <template v-else>
+            <el-form-item label="位次下界" required>
+              <el-input v-model.number="profile.rank_lo" type="number" style="width: 150px" placeholder="更好，如 40000" />
+            </el-form-item>
+            <el-form-item label="位次上界" required>
+              <el-input v-model.number="profile.rank_hi" type="number" style="width: 150px" placeholder="更差，如 50000" />
+            </el-form-item>
+          </template>
           <el-form-item label="高考分数">
             <el-input v-model.number="profile.score" type="number" style="width: 160px" placeholder="选填，仅记录" />
           </el-form-item>
@@ -95,6 +151,48 @@ const refYearsText = computed(() =>
           档案自动保存到本机，下一步「智能匹配」直接沿用。
         </p>
       </el-form>
+    </el-card>
+
+    <!-- P1 备考期：线差法估位工具 -->
+    <el-card class="card" shadow="never">
+      <template #header>
+        <div class="card__head"><span>备考期·线差法估位（还没有高考位次？用模考成绩估算）</span></div>
+      </template>
+      <div class="form__row">
+        <el-form-item label="模考分数">
+          <el-input v-model.number="estScore" type="number" style="width: 140px" placeholder="如 580" />
+        </el-form-item>
+        <el-form-item label="模考批次线">
+          <el-input v-model.number="estLine" type="number" style="width: 180px" placeholder="如学校划定的模考本科线 470" />
+        </el-form-item>
+        <el-button :loading="estLoading" @click="runEstimate">估算位次</el-button>
+      </div>
+      <template v-if="est && !est.error">
+        <el-table :data="est.per_year" size="small" border class="est-table">
+          <el-table-column prop="year" label="参考年" width="90" />
+          <el-table-column prop="line" label="当年本科线" width="110" align="right" />
+          <el-table-column prop="est_score" label="估计分（线+线差）" width="150" align="right" />
+          <el-table-column label="对应位次" min-width="180" align="right">
+            <template #default="{ row }">
+              <span v-if="row.rank_range" class="tnum">
+                {{ row.rank_range[0].toLocaleString() }} – {{ row.rank_range[1].toLocaleString() }}
+              </span>
+              <span v-else>{{ row.note || '—' }}</span>
+            </template>
+          </el-table-column>
+        </el-table>
+        <el-alert
+          v-if="est.suggested_interval"
+          type="warning"
+          :closable="false"
+          class="est-alert"
+          :title="`此为估算：建议估计位次区间 ${est.suggested_interval.lo.toLocaleString()} – ${est.suggested_interval.hi.toLocaleString()}（已外扩 ±10% 覆盖模考误差）`"
+        />
+        <p class="hint">{{ est.note }}</p>
+        <el-button v-if="est.suggested_interval" type="primary" @click="applyEstimate">
+          采用该区间作为我的估计位次 →
+        </el-button>
+      </template>
     </el-card>
 
     <el-alert v-if="error" type="error" :title="error" show-icon :closable="false" class="card" />

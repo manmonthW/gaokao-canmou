@@ -2,7 +2,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from app.routers import data_status, meta, locate, search, schools, datacenter, match, plan, auth, major_catalog, hot_schools
+from app.routers import data_status, meta, locate, search, schools, datacenter, match, plan, auth, major_catalog, hot_schools, feedback
 from app.config import CORS_ORIGINS
 from app import db, user_db
 
@@ -38,6 +38,7 @@ app.include_router(plan.router, prefix=API_PREFIX)
 app.include_router(auth.router, prefix=API_PREFIX)
 app.include_router(major_catalog.router, prefix=API_PREFIX)
 app.include_router(hot_schools.router, prefix=API_PREFIX)
+app.include_router(feedback.router, prefix=API_PREFIX)
 
 
 @app.get("/health")

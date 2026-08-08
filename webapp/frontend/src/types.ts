@@ -363,6 +363,28 @@ export interface PublicationStatus {
   note: string | null
 }
 
+// ------------------------------ 往年征集参考（P6） ------------------------------
+
+export interface CollectionItem {
+  year: number
+  batch: string
+  school_name: string
+  major_name: string | null
+  score_kind: string | null
+  lowest_score: number | null
+  lowest_rank: number | null
+}
+
+export interface CollectionReference {
+  category: string
+  subject: string | null
+  batch: string | null
+  rank: number | null
+  band: { lo: number; hi: number } | null
+  items: CollectionItem[]
+  note: string
+}
+
 // ------------------------------ 智能匹配（Phase 2） ------------------------------
 
 export type RiskLabel = '保' | '稳' | '冲' | '高波动' | '数据不足'
@@ -398,8 +420,17 @@ export interface MatchCandidate {
   break_detected: boolean
   risk: RiskLabel
   risk_reason: string
+  /** P1 区间模式：乐观情景（位次下界）分档与依据 */
+  risk_lo?: RiskLabel | null
+  risk_reason_lo?: string | null
   /** 保档安全边际线 = 最难年门槛 × safe_margin（A1，回测固化） */
   safe_line: number | null
+  /** 过深保底：门槛 > 考生位次×3，保护已饱和，不增加安全性只消耗槽位 */
+  over_safe?: boolean
+  /** 超冲：历史门槛好于考生位次超过 20%，基本只消耗槽位 */
+  over_reach?: boolean
+  /** 保档子档：标准保底 / 极稳垫底 / 过深保底 */
+  safe_band?: '标准保底' | '极稳垫底' | '过深保底' | null
   rank_diff_last: number | null
   warning: string | null
   flags: string[]
@@ -437,6 +468,7 @@ export interface BatchContext {
   score_kind: string
   score_kind_note: string
   publication: {
+    year: number
     stage: string
     status: string
     note: string | null
@@ -449,6 +481,9 @@ export interface MatchResponse {
   data_version: string | null
   examinee: MatchExaminee
   totals: MatchTotals
+  /** P1 区间模式：乐观情景分档计数（主 totals 为悲观上界） */
+  totals_lo?: MatchTotals | null
+  interval?: { lo: number; hi: number } | null
   facets: {
     province: MatchFacetItem[]
     city: MatchFacetItem[]
@@ -493,6 +528,28 @@ export interface SensitivityResponse {
   error?: string
 }
 
+/** P1 线差法估位响应（备考期） */
+export interface EstimateRankResponse {
+  category: string
+  subject: string
+  batch: string
+  score: number
+  mock_line: number
+  line_diff: number
+  line_type: string
+  per_year: {
+    year: number
+    line: number
+    est_score: number
+    rank?: number
+    rank_range?: [number, number]
+    note?: string
+  }[]
+  suggested_interval: { lo: number; hi: number } | null
+  note: string
+  error?: string
+}
+
 export interface ExamineeProfile {
   year: number
   category: string
@@ -502,6 +559,14 @@ export interface ExamineeProfile {
   rank: number | null
   /** 再选科目（D2b，可选）：如 ['化学','生物']；2027 选科要求入库后参与资格校验 */
   electives?: string[]
+  /** P1 备考期：exact=精确位次；interval=估计位次区间 */
+  rank_mode?: 'exact' | 'interval'
+  rank_lo?: number | null
+  rank_hi?: number | null
+  /** P5 偏好最小版：同档内排序依据 */
+  pref_sort?: 'certainty' | 'level' | 'city'
+  /** P5 偏好最小版：不能接受高学费（中外合作等代理标记） */
+  tuition_cap?: boolean
 }
 
 // ------------------------------ 认证 ------------------------------
@@ -547,6 +612,9 @@ export interface CandidateSnapshot {
   rank_diff_last: number | null
   yearly: MatchYearly[]
   flags?: string[]
+  over_safe?: boolean
+  over_reach?: boolean
+  safe_band?: '标准保底' | '极稳垫底' | '过深保底' | null
   data_version: string | null
   examinee_rank: number | null
   saved_at: string
@@ -556,6 +624,8 @@ export interface PlanEntry extends CandidateSnapshot {
   note: string
 }
 
+export type PlanStrategy = '冲击' | '均衡' | '稳妥'
+
 export interface VolunteerPlan {
   id: string
   name: string
@@ -564,6 +634,8 @@ export interface VolunteerPlan {
   data_version: string | null
   examinee: ExamineeProfile
   entries: PlanEntry[]
+  /** 冲稳保配比基线（体检与模板用）：冲击 36/29/35、均衡 20/50/30、稳妥 10/55/35 */
+  strategy?: PlanStrategy
 }
 
 // ---- 热门大学介绍（每日一校卡片）----
