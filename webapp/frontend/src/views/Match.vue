@@ -42,6 +42,13 @@ const RISK_HINT: Record<RiskLabel, string> = {
   数据不足: '仅参考',
 }
 
+// P5 偏好排序的悬浮说明（与后端 _pref_sort_key 语义一致，面向普通用户）
+const PREF_TIPS: Record<string, string> = {
+  certainty: '确定性优先（默认）：同一冲/稳/保档内，录取门槛最贴近你位次的单元排前面——保档即「不浪费分的最好保底」，冲档即「最现实的冲刺」；距离相同时层次高的学校靠前。',
+  level: '院校层次优先：同一档内按 985 → 211 → 双一流 → 普通院校 排序，门槛接近度作为次级依据。适合看重学校牌子、保研与校招资源的考生。',
+  city: '城市分级优先：同一档内按院校所在城市 一线/新一线 → 二线 → … → 五线 排序，门槛接近度作为次级依据。适合看重就业地域与城市资源的考生。',
+}
+
 // 风险档（决定 5 个 Tab 与默认展示顺序）：冲 → 稳 → 保 → 高波动 → 数据不足
 const RISKS: { key: RiskLabel; label: string; type: string }[] = [
   { key: '冲', label: '冲', type: 'warning' },
@@ -408,11 +415,20 @@ onMounted(async () => {
 
     <!-- P5 偏好最小版：常显偏好条，即时生效（同档内重排 + 学费代理过滤，不改变分档） -->
     <div class="pref-bar">
-      <span class="pref-bar__label">偏好</span>
+      <span class="pref-bar__label">
+        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 21v-7M4 10V3M12 21v-9M12 8V3M20 21v-5M20 12V3M1 14h6M9 8h6M17 16h6"/></svg>
+        偏好
+      </span>
       <el-radio-group v-model="profile.pref_sort" size="small" @change="runMatch(true)">
-        <el-radio-button value="certainty">确定性优先</el-radio-button>
-        <el-radio-button value="level">院校层次优先</el-radio-button>
-        <el-radio-button value="city">城市分级优先</el-radio-button>
+        <el-tooltip :content="PREF_TIPS.certainty" placement="top" popper-class="wb-tip">
+          <el-radio-button value="certainty">确定性优先</el-radio-button>
+        </el-tooltip>
+        <el-tooltip :content="PREF_TIPS.level" placement="top" popper-class="wb-tip">
+          <el-radio-button value="level">院校层次优先</el-radio-button>
+        </el-tooltip>
+        <el-tooltip :content="PREF_TIPS.city" placement="top" popper-class="wb-tip">
+          <el-radio-button value="city">城市分级优先</el-radio-button>
+        </el-tooltip>
       </el-radio-group>
       <el-checkbox v-model="profile.tuition_cap" @change="runMatch(true)">
         学费 ≤2 万/年（自动排除中外合作办学等高学费项目）
@@ -501,9 +517,15 @@ onMounted(async () => {
             本站拿「每个单元历年录取最低分对应的全省位次」与你的位次比较来分档（位次法），不输出录取概率。
             「保」档另要求缓冲足够：你的位次需优于「最难一年门槛 × {{ data.classification_note.safe_margin }}」（安全线）。
           </p>
-          <el-collapse v-model="noteOpen">
+          <el-collapse v-model="noteOpen" class="note-collapse">
             <el-collapse-item name="note">
-              <template #title>查看每档具体怎么算 + 回测数据</template>
+              <template #title>
+                <span class="sec__action">
+                  <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
+                  查看每档具体怎么算 + 回测数据
+                  <svg class="sec__action-arrow" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>
+                </span>
+              </template>
               <p class="note-line"><b>保</b>：历年哪怕最难的一年，你这个位次也录得上，且缓冲过了安全线（最难一年门槛 × {{ data.classification_note.safe_margin }}）——明年稍难也安全；</p>
               <p class="note-line"><b>稳</b>：历年你这个位次都录得上，但缓冲薄、没过安全线——门槛若上移有风险；</p>
               <p class="note-line"><b>冲</b>：历年你这个位次都录不上（当年录取末位比你靠前）——需明年门槛下移才有机会；</p>
@@ -522,7 +544,7 @@ onMounted(async () => {
         <div class="sec">
           <div class="sec__head">
             <span class="sec__title">② 位次敏感度试算</span>
-            <el-button size="small" :loading="sensLoading" @click="runSensitivity">开始试算（±5% / ±10%）</el-button>
+            <span class="sec__sub">位次若有偏差，分档结果会怎么变</span>
           </div>
           <p class="hint">
             什么是试算：位次是按分数在一分一段表里查的，但同一分数往往有很多人，
@@ -530,6 +552,10 @@ onMounted(async () => {
             这里用与①相同的分档规则（含安全线），把位次按 ±5% / ±10% 五种情景重新统计各档单元数，
             看「位次若有偏差，分档结果会怎么变」——用来检查你的志愿梯度是否留够；不是录取概率预测。
           </p>
+          <button type="button" class="sec__action" :disabled="sensLoading" @click="runSensitivity">
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+            {{ sensLoading ? '试算中…' : (sens ? '重新试算（±5% / ±10%）' : '开始试算（±5% / ±10%）') }}
+          </button>
         <div v-if="sens" class="sens">
           <el-alert v-if="sens.error" type="error" :title="sens.error" show-icon :closable="false" />
           <template v-else>
@@ -825,7 +851,14 @@ onMounted(async () => {
   border: 1px solid var(--color-border, var(--el-border-color-lighter));
   border-radius: var(--radius-md, 8px);
 }
-.pref-bar__label { font-size: var(--text-sm); font-weight: 600; color: var(--color-text); }
+.pref-bar__label {
+  display: inline-flex; align-items: center; gap: 5px;
+  padding: 3px 12px; border-radius: 999px;
+  font-size: var(--text-sm); font-weight: 700; letter-spacing: 2px;
+  color: var(--el-color-warning);
+  background: var(--el-color-warning-light-9);
+  border: 1px solid var(--el-color-warning-light-5);
+}
 .pref-bar__hint { font-size: var(--text-xs); color: var(--color-text-muted); margin-left: auto; }
 
 .school-link { color: var(--color-primary); cursor: pointer; }
@@ -880,6 +913,35 @@ onMounted(async () => {
 .sec__head { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); margin-bottom: var(--space-2); }
 .sec__title { font-weight: 700; }
 .sec__sub { font-size: var(--text-xs); color: var(--color-text-muted); }
+/* ①/② 统一行动按钮：软蓝底 + 边框 + 图标，整行可点，悬停加深 */
+.sec__action {
+  display: flex; align-items: center; gap: 8px;
+  width: 100%;
+  margin-top: var(--space-3);
+  padding: 10px 14px;
+  border: 1px solid var(--color-border-strong, #d5dbe3);
+  border-radius: var(--radius-md, 8px);
+  background: var(--color-primary-soft);
+  color: var(--color-primary);
+  font-size: var(--text-base); font-weight: 600;
+  cursor: pointer;
+  transition: background .15s, border-color .15s;
+}
+.sec__action:hover { background: #dce9ff; border-color: var(--color-primary); }
+.sec__action:disabled { opacity: .6; cursor: default; }
+.sec__action-arrow { margin-left: auto; transition: transform .2s; }
+/* ① 折叠面板：头部换成行动按钮外观，隐藏默认箭头与分割线 */
+.note-collapse { border-top: none; border-bottom: none; }
+.note-collapse :deep(.el-collapse-item__header) {
+  height: auto; line-height: 1.5;
+  background: transparent; border: none;
+  font-size: inherit;
+}
+.note-collapse :deep(.el-collapse-item__header .sec__action) { margin-top: var(--space-3); }
+.note-collapse :deep(.el-collapse-item__arrow) { display: none; }
+.note-collapse :deep(.el-collapse-item__header.is-active .sec__action-arrow) { transform: rotate(90deg); }
+.note-collapse :deep(.el-collapse-item__wrap) { border-bottom: none; background: transparent; }
+.note-collapse :deep(.el-collapse-item__content) { padding: 10px 4px 0; }
 .sec-divider { margin: var(--space-4) 0; }
 .sens-legend { margin: 0 0 var(--space-2); }
 .sens-explain { margin-top: var(--space-2); }

@@ -7,10 +7,6 @@ const data = ref<GuidesResponse | null>(null)
 const loading = ref(false)
 const error = ref<string | null>(null)
 
-// 阅读器：全屏对话框内嵌 PDF（iframe），另提供新窗口打开与下载
-const viewerVisible = ref(false)
-const viewerItem = ref<GuideItem | null>(null)
-
 function fmtSize(n: number | null): string {
   if (n == null) return '—'
   if (n < 1024 * 1024) return `${(n / 1024).toFixed(0)} KB`
@@ -29,10 +25,10 @@ async function load() {
   }
 }
 
-function openViewer(it: GuideItem) {
+// 点击卡片：新窗口打开排版精美的 HTML 阅读页
+function openReader(it: GuideItem) {
   if (!it.available) return
-  viewerItem.value = it
-  viewerVisible.value = true
+  window.open(api.guideHtmlUrl(it.id), '_blank', 'noopener')
 }
 
 onMounted(load)
@@ -43,7 +39,8 @@ onMounted(load)
     <div class="lib-eyebrow"><span class="lib-eyebrow__dot"></span>资料库 · 官方文件</div>
     <h1 class="page__title">报考说明</h1>
     <p class="page__sub">
-      辽宁省 2026 年官方招考文件在线阅读。建议按「总政策 → 填报操作 → 专项通道」的顺序阅读：
+      辽宁省 2026 年官方招考文件在线阅读。点击任一文档会在<b>新窗口</b>打开重新排版、便于阅读的网页版，
+      页面内可一键<b>下载原文 PDF</b>。建议按「总政策 → 填报操作 → 专项通道」的顺序阅读：
       先读懂规则，再学操作，报考军校/公安的同学别忘了对应的专项文件有时限要求。
     </p>
 
@@ -65,7 +62,7 @@ onMounted(load)
             class="doc"
             shadow="hover"
             :class="{ 'doc--disabled': !it.available }"
-            @click="openViewer(it)"
+            @click="openReader(it)"
           >
             <div class="doc__top">
               <span class="doc__pdf">PDF</span>
@@ -78,46 +75,22 @@ onMounted(load)
             </div>
             <div class="doc__foot">
               <span class="doc__size tnum">{{ fmtSize(it.size_bytes) }}</span>
-              <span v-if="it.available" class="doc__open">点击阅读 →</span>
+              <span v-if="it.available" class="doc__open">新窗口阅读 →</span>
               <span v-else class="doc__missing">文件待上传</span>
             </div>
+            <a
+              v-if="it.available"
+              class="doc__dl"
+              :href="api.guidePdfUrl(it.id)"
+              :download="it.filename"
+              @click.stop
+            >⬇ 下载原文 PDF</a>
           </el-card>
         </div>
       </section>
 
       <p class="note">{{ data.note }}</p>
     </template>
-
-    <!-- PDF 阅读器 -->
-    <el-dialog
-      v-model="viewerVisible"
-      :title="viewerItem?.title"
-      fullscreen
-      append-to-body
-      class="viewer"
-    >
-      <iframe
-        v-if="viewerItem && viewerVisible"
-        :src="api.guidePdfUrl(viewerItem.id)"
-        class="viewer__frame"
-        :title="viewerItem.title"
-      />
-      <template #footer>
-        <el-button @click="viewerVisible = false">关闭</el-button>
-        <el-button
-          plain
-          tag="a"
-          :href="viewerItem ? api.guidePdfUrl(viewerItem.id) : '#'"
-          target="_blank"
-        >新窗口打开</el-button>
-        <el-button
-          type="primary"
-          tag="a"
-          :href="viewerItem ? api.guidePdfUrl(viewerItem.id) : '#'"
-          :download="viewerItem?.filename"
-        >下载 PDF</el-button>
-      </template>
-    </el-dialog>
   </div>
 </template>
 
@@ -157,9 +130,13 @@ onMounted(load)
 .doc__size { color: var(--color-text-muted); font-size: var(--text-xs); }
 .doc__open { color: var(--color-primary, #3370ff); font-size: var(--text-xs); }
 .doc__missing { color: var(--color-text-muted); font-size: var(--text-xs); }
+.doc__dl {
+  display: block; margin-top: var(--space-3); padding-top: var(--space-2);
+  border-top: 1px solid var(--color-border, #e3e8ef);
+  color: var(--color-primary, #3370ff); font-size: var(--text-xs);
+  text-decoration: none; text-align: right;
+}
+.doc__dl:hover { text-decoration: underline; }
 
 .note { color: var(--color-text-muted); font-size: var(--text-xs); margin-top: var(--space-4); }
-
-.viewer :deep(.el-dialog__body) { padding: 0; height: calc(100vh - 110px); overflow: hidden; }
-.viewer__frame { width: 100%; height: 100%; border: none; }
 </style>

@@ -11,7 +11,7 @@
 import os
 
 from fastapi import APIRouter, HTTPException
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, HTMLResponse
 
 router = APIRouter(prefix="/guides", tags=["guides"])
 
@@ -32,6 +32,14 @@ def _item(id, title, filename, summary, points, tag):
         "id": id, "title": title, "filename": filename,
         "summary": summary, "points": points, "tag": tag,
     }
+
+
+# 由 etl/build_guide_html.py 预先生成的排版 HTML（自包含样式）
+_HTML_DIR = os.path.join(
+    os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(
+        os.path.dirname(os.path.abspath(__file__)))))),
+    "webapp", "backend", "static", "guides",
+)
 
 
 _GROUPS = [
@@ -224,3 +232,21 @@ async def guide_pdf(gid: str):
                 return FileResponse(
                     path, media_type="application/pdf", filename=it["filename"])
     raise HTTPException(404, f"未知文件 id：{gid}")
+
+
+@router.get("/{gid}/html")
+async def guide_html(gid: str):
+    """返回由 PDF 重新排版生成的精美 HTML 阅读页（新窗口打开用）。
+
+    文件由 etl/build_guide_html.py 预生成到 static/guides/{id}.html；
+    扫描件则内嵌原始 PDF 以保证内容准确。
+    """
+    # 校验 id 在白名单内，避免任意路径
+    valid = any(it["id"] == gid for g in _GROUPS for it in g["items"])
+    if not valid:
+        raise HTTPException(404, f"未知文件 id：{gid}")
+    path = os.path.join(_HTML_DIR, f"{gid}.html")
+    if not os.path.exists(path):
+        raise HTTPException(404, "该指南的排版页面尚未生成，请先运行 etl/build_guide_html.py")
+    with open(path, encoding="utf-8") as f:
+        return HTMLResponse(f.read())
