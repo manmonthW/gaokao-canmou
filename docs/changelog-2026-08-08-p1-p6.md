@@ -307,3 +307,52 @@ P1–P6 全量冒烟与前端构建全绿。
 - 全局 `.wb-tip` popper 样式（max-width 460px）保证长文案换行。
 
 **验证**：前端构建全绿。
+
+## 十八、院校圈层标签悬浮说明 + 导出 422 修复（2026-08-09）
+
+**标签解释**（`SchoolSearch.vue`）：热门大学介绍的分类 Tab、卡片标签、详情抽屉标签
+统一包 `el-tooltip`，`CAT_TIP` 字典维护 985/211/双一流/C9/E9/五院四系/两电一邮/
+国防七子/八大美院的通俗解释；字典外分类自动禁用气泡；全局 `.cat-tip` 样式限宽换行。
+
+**导出 422 修复**：`v-model.number` 清空输入会在 localStorage 快照留下空字符串，
+导出时 `examinee.score=""` 触发 pydantic `float_parsing` 422。
+- 前端（`Workbench.vue`）：`num()` 净化，score/rank/last_year*等数值字段非有限值转 null；
+- 后端（`plan.py`）：`PlanExaminee`/`PlanItem` 数值字段加 before-validator，空白字符串视为 null。
+
+**验证**：前端构建全绿；后端重启；`scripts/test_plan_export.sh` 空字符串与正常数值
+两组请求均 HTTP 200 且返回有效 xlsx。
+
+## 十九、数据中心新增「选科要求」Tab：2027 官方三表原样浏览（2026-08-09）
+
+**目的**：2027 选考科目要求三表（bk 本科 / zk 专科 / jx 军校）此前只参与匹配层
+资格校验，现开放原始浏览供用户自行溯源核对。
+
+- 后端：`datacenter.py` 新增 `GET /datacenter/subject-requirements/summary`（各表行数
+  与院校数）与 `GET /datacenter/subject-requirements`（分页，支持年份/表类型/
+  院校/专业关键字/首选要求筛选）；表类型由 source_files 文件名后缀推导；
+- 前端：`DataCenter.vue` 新增「选科要求」Tab，汇总胶囊（本科 48,044 行/1,152 所、
+  专科 29,807 行/1,059 所、军校 440 行/27 所）+ 筛选器 + 分页表；首选要求按
+  物理/历史/不限配色，再选为空显示「无要求」；`types.ts`/`client.ts` 同步新类型与接口。
+
+**验证**：前端构建全绿；后端重启；`scripts/smoke_xk_dc.sh` 抽查 summary/默认分页/
+jx 表/院校+专业+首选组合筛选（大连理工·物理 69 行）全部符合预期。
+
+## 二十、新增「报考说明」页：7 份辽宁 2026 官方招考文件在线阅读（2026-08-09）
+
+**目的**：官方 PDF 散落在资料目录，用户难以随时查阅。在顶部导航「院校查询」前新增
+「报考说明」入口，按阅读习惯分四组整理成网页，随点随读。
+
+- 后端：新增 `routers/guides.py`（不落库、只读元数据 + PDF 流式下载）：
+  `GET /guides` 返回分组元数据（标题/简介/要点/标签/文件大小），
+  `GET /guides/{id}/pdf` 白名单限定下载（未知 id 与路径穿越均 404），
+  文件根目录可用 `GUIDE_PDF_ROOT` 环境变量覆盖；`main.py` 注册路由；
+- 分组按阅读顺序：总政策（招生简章/志愿填报问答/提前批调整解读）→
+  填报操作（填报须知）→ 专项通道（军校 2 份、公安 1 份），
+  每份文件配一句话摘要与要点列表，标签标注「必读/最新变化/有截止时限」等；
+- 前端：新增 `views/Guides.vue`（分组卡片 + 全屏对话框内嵌 PDF 阅读器，
+  支持新窗口打开与下载）；`types.ts`/`client.ts` 新增 Guide 类型与接口；
+  `router/index.ts` 注册 `/guides`；`App.vue` 资料库导航「院校查询」前加入口与图标。
+
+**验证**：前端构建全绿；后端重启；`scripts/smoke_guides.sh` 抽查 7 份文件元数据
+（total=7、全部 available）、招生简章 PDF 下载（HTTP 200、831 KB、8 页）、
+未知 id 与路径穿越均 404。

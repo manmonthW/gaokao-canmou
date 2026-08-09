@@ -2,7 +2,7 @@
 import { ref, onMounted, watch, computed } from 'vue'
 import { useRoute } from 'vue-router'
 import { api } from '@/api/client'
-import type { DataStatusMatrix, CollectionReference } from '@/types'
+import type { DataStatusMatrix, CollectionReference, SubjectReqSummary, PagedSubjectReqs } from '@/types'
 
 const route = useRoute()
 const meta = ref<any>(null)
@@ -47,6 +47,16 @@ const collFilters = ref({
   rank: null as number | null,
 })
 const collData = ref<CollectionReference | null>(null)
+
+// 选科要求三表（D2b）：官方 2027 选考科目要求原样浏览，不参与任何计算
+const XK_TABLE_LABEL: Record<string, string> = { bk: '本科', zk: '专科', jx: '军校' }
+const XK_NOTE = '官方《拟在辽招生普通高校专业选考科目要求》三表：bk 本科 / zk 专科 / jx 军校；「不限」即不提科目要求。'
+const xkFilters = ref({ year: null as number | null, table: '', school: '', major: '', first_req: '' })
+const xkData = ref<PagedSubjectReqs | null>(null)
+const xkSummary = ref<SubjectReqSummary | null>(null)
+const xkPage = ref(1)
+const xkYears = computed(() =>
+  [...new Set((xkSummary.value?.items || []).map((i) => i.year))].sort((a, b) => b - a))
 
 async function guard(fn: () => Promise<void>) {
   loading.value = true
@@ -111,6 +121,22 @@ function loadColl() {
     })
   })
 }
+function loadXkSummary() {
+  return guard(async () => { xkSummary.value = await api.subjectReqSummary() })
+}
+function loadXk() {
+  return guard(async () => {
+    xkData.value = await api.subjectReqs({
+      year: xkFilters.value.year ?? undefined,
+      table: xkFilters.value.table || undefined,
+      school: xkFilters.value.school || undefined,
+      major: xkFilters.value.major || undefined,
+      first_req: xkFilters.value.first_req || undefined,
+      page: xkPage.value,
+      page_size: 50,
+    })
+  })
+}
 
 function onTab(tab: string) {
   if (tab === 'lines' && !lines.value.length) loadLines()
@@ -119,6 +145,10 @@ function onTab(tab: string) {
   if (tab === 'pub' && !pubStatus.value.length) loadPub()
   if (tab === 'matrix' && !matrix.value) loadMatrix()
   if (tab === 'collection' && !collData.value) loadColl()
+  if (tab === 'xk') {
+    if (!xkSummary.value) loadXkSummary()
+    if (!xkData.value) loadXk()
+  }
 }
 
 // 原始记录：批次下拉按已选科类联动（数据驱动，来自 meta.batches_by_category）。
@@ -169,16 +199,18 @@ onMounted(async () => {
 
 watch(rankPage, () => { if (active.value === 'rank') loadRank() })
 watch(recPage, () => { if (active.value === 'records') loadRec() })
+watch(xkPage, () => { if (active.value === 'xk') loadXk() })
 
 function onRankFilter() { rankPage.value = 1; loadRank() }
 function onRecFilter() { recPage.value = 1; loadRec() }
+function onXkFilter() { xkPage.value = 1; loadXk() }
 </script>
 
 <template>
   <div class="page">
     <div class="lib-eyebrow"><span class="lib-eyebrow__dot"></span>资料库 · 原始数据</div>
     <h1 class="page__title">数据中心</h1>
-    <p class="page__sub">省控线、一分一段表、原始录取记录与批次发布状态。这里是原始数据溯源，一般决策看前面「定位 → 匹配 → 工作台」三步即可。</p>
+    <p class="page__sub">省控线、一分一段表、原始录取记录、批次发布状态与 2027 选科要求。这里是原始数据溯源，一般决策看前面「定位 → 匹配 → 工作台」三步即可。</p>
 
     <el-alert v-if="error" type="error" :title="error" show-icon :closable="false" class="card" />
 
@@ -421,6 +453,75 @@ function onRecFilter() { recPage.value = 1; loadRec() }
           </el-table-column>
         </el-table>
       </el-tab-pane>
+
+      <!-- 选科要求三表（D2b）：官方 2027 选考科目要求原样浏览 -->
+      <el-tab-pane label="选科要求" name="xk">
+        <el-alert
+          type="info"
+          show-icon
+          :closable="false"
+          class="xk-alert"
+          :title="xkSummary?.note || XK_NOTE"
+        />
+        <div v-if="xkSummary?.items.length" class="xk-sum">
+          <span v-for="it in xkSummary.items" :key="`${it.year}-${it.table}`" class="xk-sum__chip">
+            {{ it.year }} {{ XK_TABLE_LABEL[it.table] || it.table }}：
+            <span class="tnum">{{ it.rows.toLocaleString() }}</span> 行 ·
+            <span class="tnum">{{ it.schools.toLocaleString() }}</span> 所院校
+          </span>
+        </div>
+        <div class="filters wrap">
+          <el-select v-model="xkFilters.year" placeholder="年份" clearable class="f-sel" @change="onXkFilter()">
+            <el-option v-for="y in xkYears" :key="y" :label="y" :value="y" />
+          </el-select>
+          <el-select v-model="xkFilters.table" placeholder="表类型" clearable class="f-sel" @change="onXkFilter()">
+            <el-option label="本科（bk）" value="bk" />
+            <el-option label="专科（zk）" value="zk" />
+            <el-option label="军校（jx）" value="jx" />
+          </el-select>
+          <el-select v-model="xkFilters.first_req" placeholder="首选要求" clearable class="f-sel" @change="onXkFilter()">
+            <el-option label="物理" value="物理" />
+            <el-option label="历史" value="历史" />
+            <el-option label="不限" value="不限" />
+          </el-select>
+          <el-input v-model="xkFilters.school" placeholder="院校名" clearable class="f-q" @keyup.enter="onXkFilter()" />
+          <el-input v-model="xkFilters.major" placeholder="专业名" clearable class="f-q" @keyup.enter="onXkFilter()" />
+          <el-button @click="onXkFilter()">查询</el-button>
+          <el-pagination
+            v-if="xkData"
+            layout="prev, pager, next, total"
+            :total="xkData.total"
+            :page-size="xkData.page_size"
+            v-model:current-page="xkPage"
+            class="pg"
+          />
+        </div>
+        <div v-if="xkData && !xkData.items.length" class="empty">无符合条件的选科要求记录，请调整筛选。</div>
+        <el-table v-if="xkData && xkData.items.length" :data="xkData.items" size="small" border fit>
+          <el-table-column label="表" width="70">
+            <template #default="{ row }">{{ XK_TABLE_LABEL[row.table] || '—' }}</template>
+          </el-table-column>
+          <el-table-column prop="school_code" label="院校代码" width="90" />
+          <el-table-column prop="school_name" label="院校" min-width="140" show-overflow-tooltip />
+          <el-table-column prop="major_code" label="专业代码" width="90" />
+          <el-table-column prop="major_name" label="专业（类）" min-width="160" show-overflow-tooltip />
+          <el-table-column label="首选要求" width="100">
+            <template #default="{ row }">
+              <el-tag
+                size="small"
+                effect="plain"
+                :type="row.first_req === '不限' ? 'success' : row.first_req === '历史' ? 'warning' : ''"
+              >{{ row.first_req || '—' }}</el-tag>
+            </template>
+          </el-table-column>
+          <el-table-column label="再选要求" min-width="220" show-overflow-tooltip>
+            <template #default="{ row }">
+              <span v-if="row.re_req">{{ row.re_req }}</span>
+              <span v-else class="dim">无要求</span>
+            </template>
+          </el-table-column>
+        </el-table>
+      </el-tab-pane>
     </el-tabs>
   </div>
 </template>
@@ -441,6 +542,10 @@ function onRecFilter() { recPage.value = 1; loadRec() }
 .matrix-sub { margin: var(--space-5) 0 var(--space-2); font-size: var(--text-base); }
 .coll-alert { margin-bottom: var(--space-4); }
 .coll-band { color: var(--color-text-secondary); font-size: var(--text-sm); margin: 0 0 var(--space-3); }
+.xk-alert { margin-bottom: var(--space-4); }
+.xk-sum { display: flex; flex-wrap: wrap; gap: var(--space-2); margin-bottom: var(--space-3); }
+.xk-sum__chip { font-size: var(--text-xs); color: var(--color-text-secondary); border: 1px solid var(--color-border, #e3e8ef); border-radius: 999px; padding: 3px 10px; }
+.dim { color: var(--color-text-muted); }
 :deep(.matrix-gap) td { background: var(--el-color-danger-light-9) !important; }
 .empty { padding: var(--space-8); text-align: center; color: var(--color-text-muted); }
 </style>

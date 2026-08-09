@@ -1,6 +1,16 @@
-"""数据中心服务：省控线、一分一段、原始录取记录、源文件、批次发布状态。"""
+"""数据中心服务：省控线、一分一段、原始录取记录、源文件、批次发布状态、选科要求。"""
+import re
+
 from app import db
 from app.config import MAX_PAGE_SIZE
+
+# 官方选科三表文件名后缀 → 表类型（bk 本科 / zk 专科 / jx 军校）
+_XK_TABLE_SUFFIX = re.compile(r"(bk|zk|jx)(?=\.xlsx?$)", re.I)
+
+
+def _xk_table_of(filename):
+    m = _XK_TABLE_SUFFIX.search(filename or "")
+    return m.group(1).lower() if m else None
 
 
 async def control_lines(year=None, category=None, subject=None):
@@ -172,4 +182,71 @@ async def collection_reference(category, subject=None, batch=None,
         "note": ("征集志愿是常规投档未录满后的补充录取，属于「最坏情况参考」，"
                  "不代表这些院校专业明年的正常录取水平；征集数据不参与本站智能匹配，"
                  "请以省招考办官方征集公告为准。"),
+    }
+
+
+async def subject_requirements_summary():
+    """选科要求三表汇总：各年份 × 表类型（本科/专科/军校）行数与院校数。"""
+    rows = await db.fetch_all(
+        """SELECT sr.year, sf.filename,
+                  count(*) AS rows, count(DISTINCT sr.school_name) AS schools
+           FROM subject_requirements sr
+           JOIN source_files sf ON sf.id = sr.src_id
+           GROUP BY sr.year, sf.filename
+           ORDER BY sr.year DESC, sf.filename""")
+    items = []
+    for r in rows:
+        t = _xk_table_of(r[1])
+        if not t:
+            continue
+        items.append({"year": r[0], "table": t, "filename": r[1],
+                      "rows": r[2], "schools": r[3]})
+    return {"items": items,
+            "note": ("官方《拟在辽招生普通高校专业选考科目要求》三表："
+                     "bk 本科 / zk 专科 / jx 军校；「不限」即不提科目要求。")}
+
+
+async def subject_requirements(year=None, table=None, school=None, major=None,
+                               first_req=None, page=1, page_size=50):
+    """选科要求三表明细（分页）：按年份/表类型/院校/专业/首选要求筛选。"""
+    page_size = min(max(page_size, 1), MAX_PAGE_SIZE)
+    offset = (max(page, 1) - 1) * page_size
+    where = "WHERE 1=1"
+    params = []
+    if year:
+        where += " AND sr.year=%s"; params.append(year)
+    if table:
+        where += " AND sf.filename ILIKE %s"; params.append(f"%{table}.xlsx")
+    if school:
+        where += " AND sr.school_name ILIKE %s"; params.append(f"%{school}%")
+    if major:
+        where += " AND sr.major_name ILIKE %s"; params.append(f"%{major}%")
+    if first_req:
+        where += " AND sr.first_req=%s"; params.append(first_req)
+
+    total = await db.fetch_one(
+        f"""SELECT count(*) FROM subject_requirements sr
+            JOIN source_files sf ON sf.id = sr.src_id {where}""", params)
+    total = total[0] if total else 0
+    params.extend([page_size, offset])
+    rows = await db.fetch_all(
+        f"""SELECT sr.year, sf.filename, sr.school_code, sr.school_name,
+                   sr.major_code, sr.major_name, sr.group_code,
+                   sr.first_req, sr.re_req
+            FROM subject_requirements sr
+            JOIN source_files sf ON sf.id = sr.src_id {where}
+            ORDER BY sr.year DESC, sr.school_code, sr.school_name,
+                     sr.major_code NULLS LAST
+            LIMIT %s OFFSET %s""",
+        params,
+    )
+    return {
+        "total": total, "page": page, "page_size": page_size,
+        "items": [
+            {"year": r[0], "table": _xk_table_of(r[1]),
+             "school_code": r[2], "school_name": r[3],
+             "major_code": r[4], "major_name": r[5], "group_code": r[6],
+             "first_req": r[7], "re_req": r[8]}
+            for r in rows
+        ],
     }

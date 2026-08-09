@@ -6,6 +6,7 @@ import SchoolDetail from '@/views/SchoolDetail.vue'
 import SchoolMajorDetail from '@/views/SchoolMajorDetail.vue'
 import DataCenter from '@/views/DataCenter.vue'
 import Eligibility from '@/views/Eligibility.vue'
+import Guides from '@/views/Guides.vue'
 import Match from '@/views/Match.vue'
 import Workbench from '@/views/Workbench.vue'
 import Auth from '@/views/Auth.vue'
@@ -13,6 +14,7 @@ import Auth from '@/views/Auth.vue'
 const routes = [
   { path: '/', name: 'locate', component: Locate },
   { path: '/auth', name: 'auth', component: Auth, meta: { public: true } },
+  { path: '/guides', name: 'guides', component: Guides },
   { path: '/search/school', name: 'school-search', component: SchoolSearch },
   { path: '/search/major', name: 'major-search', component: MajorSearch },
   { path: '/school/:code', name: 'school-detail', component: SchoolDetail },

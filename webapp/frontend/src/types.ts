@@ -385,6 +385,69 @@ export interface CollectionReference {
   note: string
 }
 
+// ------------------------------ 选科要求三表（D2b / 数据中心） ------------------------------
+
+/** 表类型：bk 本科 / zk 专科 / jx 军校 */
+export type XkTable = 'bk' | 'zk' | 'jx'
+
+export interface SubjectReqSummaryItem {
+  year: number
+  table: XkTable
+  filename: string
+  rows: number
+  schools: number
+}
+
+export interface SubjectReqSummary {
+  items: SubjectReqSummaryItem[]
+  note: string
+}
+
+export interface SubjectReqItem {
+  year: number
+  table: XkTable | null
+  school_code: string | null
+  school_name: string
+  major_code: string | null
+  major_name: string | null
+  group_code: string | null
+  first_req: string | null
+  re_req: string | null
+}
+
+export interface PagedSubjectReqs {
+  total: number
+  page: number
+  page_size: number
+  items: SubjectReqItem[]
+}
+
+// ------------------------------ 报考说明（官方招考文件） ------------------------------
+
+export interface GuideItem {
+  id: string
+  title: string
+  filename: string
+  summary: string
+  points: string[]
+  tag: string
+  size_bytes: number | null
+  available: boolean
+}
+
+export interface GuideGroup {
+  key: string
+  title: string
+  desc: string
+  items: GuideItem[]
+}
+
+export interface GuidesResponse {
+  groups: GuideGroup[]
+  total: number
+  note: string
+}
+
 // ------------------------------ 智能匹配（Phase 2） ------------------------------
 
 export type RiskLabel = '保' | '稳' | '冲' | '高波动' | '数据不足'

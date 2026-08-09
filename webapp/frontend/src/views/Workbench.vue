@@ -275,6 +275,10 @@ async function submitFeedback() {
 
 // ---------- 导出 ----------
 const exporting = ref(false)
+// 数值净化：v-model.number 清空输入会留下空字符串（localStorage 快照可能带脏值），
+// 非有限数值一律转 null，避免后端 float/int 解析 422
+const num = (v: unknown): number | null =>
+  typeof v === 'number' && Number.isFinite(v) ? v : null
 async function exportPlan(p: VolunteerPlan) {
   if (!p.entries.length) {
     ElMessage.warning('方案为空，无可导出内容')
@@ -290,14 +294,14 @@ async function exportPlan(p: VolunteerPlan) {
       examinee: {
         year: p.examinee.year, category: p.examinee.category,
         subject: p.examinee.subject, batch: p.examinee.batch,
-        score: p.examinee.score, rank: p.examinee.rank,
+        score: num(p.examinee.score), rank: num(p.examinee.rank),
       },
       items: p.entries.map((e) => ({
         risk: e.risk,
         school_code: e.school_code, school_name: e.school_name,
         major_code: e.major_code, major_name: e.major_name,
-        last_year: e.last_year, last_year_score: e.last_year_score,
-        last_year_rank: e.last_year_rank, rank_diff_last: e.rank_diff_last,
+        last_year: num(e.last_year), last_year_score: num(e.last_year_score),
+        last_year_rank: num(e.last_year_rank), rank_diff_last: num(e.rank_diff_last),
         level: e.level, city: e.city, flags: e.flags || [], note: e.note,
       })),
     })

@@ -66,3 +66,25 @@ async def collection_reference(category: str = Query(...),
     return await svc.collection_reference(category, subject=subject,
                                           batch=batch, rank=rank,
                                           window=window)
+
+
+@router.get("/subject-requirements/summary")
+async def subject_requirements_summary():
+    """选科要求三表汇总（各年份 × 本科/专科/军校的行数与院校数）。"""
+    return await svc.subject_requirements_summary()
+
+
+@router.get("/subject-requirements")
+async def subject_requirements(year: Optional[int] = Query(None),
+                               table: Optional[str] = Query(None, pattern="^(bk|zk|jx)$",
+                                                            description="表类型：bk 本科 / zk 专科 / jx 军校"),
+                               school: Optional[str] = Query(None),
+                               major: Optional[str] = Query(None),
+                               first_req: Optional[str] = Query(None, description="首选要求：物理/历史/不限"),
+                               page: int = Query(1, ge=1),
+                               page_size: int = Query(50, ge=1, le=500)):
+    """2027 选考科目要求官方三表明细（分页、可筛选）。"""
+    return await svc.subject_requirements(year=year, table=table,
+                                          school=school, major=major,
+                                          first_req=first_req,
+                                          page=page, page_size=page_size)

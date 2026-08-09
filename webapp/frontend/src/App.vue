@@ -56,6 +56,12 @@ const steps = computed(() => [
 // 资料库（工具，无序、随时查）：图标分段按钮，各入口独立配色便于区分
 const library = [
   {
+    to: '/guides',
+    label: '报考说明',
+    icon: 'guide',
+    style: '--icon: #d93026; --icon-soft: rgba(217, 48, 38, 0.08)',
+  },
+  {
     to: '/search/school',
     label: '院校查询',
     icon: 'school',
@@ -104,8 +110,10 @@ const chromeless = computed(() => route.meta.public === true)
             :style="l.style"
           >
             <span class="lib-btn__icon" aria-hidden="true">
+              <!-- 报考说明：官方文件 -->
+              <svg v-if="l.icon === 'guide'" viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/><path d="M9 13h6M9 17h6"/></svg>
               <!-- 院校：学位帽 -->
-              <svg v-if="l.icon === 'school'" viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 10 12 5 2 10l10 5z"/><path d="M6 12v5c3 3 9 3 12 0v-5"/></svg>
+              <svg v-else-if="l.icon === 'school'" viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 10 12 5 2 10l10 5z"/><path d="M6 12v5c3 3 9 3 12 0v-5"/></svg>
               <!-- 专业：翻开的书 -->
               <svg v-else-if="l.icon === 'book'" viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 4h6a4 4 0 0 1 4 4v13a3 3 0 0 0-3-3H2z"/><path d="M22 4h-6a4 4 0 0 0-4 4v13a3 3 0 0 1 3-3h7z"/></svg>
               <!-- 数据：柱状图 -->

@@ -68,6 +68,9 @@ import type {
   SourceFile,
   PublicationStatus,
   CollectionReference,
+  SubjectReqSummary,
+  PagedSubjectReqs,
+  GuidesResponse,
   MatchResponse,
   SensitivityResponse,
   RankContext,
@@ -119,6 +122,14 @@ export const api = {
   // P6 往年征集参考（最坏情况安全网，不参与智能匹配）
   collectionReference: (p: Record<string, unknown>) =>
     getJson<CollectionReference>(`/datacenter/collection-reference${buildQuery(p)}`),
+  // 选科要求三表（官方 2027 选考科目要求）
+  subjectReqSummary: () =>
+    getJson<SubjectReqSummary>('/datacenter/subject-requirements/summary'),
+  subjectReqs: (p: Record<string, unknown>) =>
+    getJson<PagedSubjectReqs>(`/datacenter/subject-requirements${buildQuery(p)}`),
+  // 报考说明（官方招考文件在线阅读）
+  guides: () => getJson<GuidesResponse>('/guides'),
+  guidePdfUrl: (id: string) => `${ORIGIN}${PREFIX}/guides/${encodeURIComponent(id)}/pdf`,
   match: (p: Record<string, unknown>) =>
     getJson<MatchResponse>(`/match${buildQuery(p)}`),
   matchSensitivity: (p: Record<string, unknown>) =>

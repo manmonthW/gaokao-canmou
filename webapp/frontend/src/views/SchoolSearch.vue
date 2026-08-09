@@ -35,6 +35,19 @@ function open(code: string) {
 
 // ---- 热门大学介绍 ----
 const categories = ref<HotSchoolCategory[]>([])
+
+// 院校圈层标签的通俗解释（Tab / 卡片标签 / 详情标签悬浮展示）
+const CAT_TIP: Record<string, string> = {
+  '985': '1998年5月启动的国家重点建设工程，全国共39所顶尖综合性研究型大学，报考认可度最高的“金字招牌”。',
+  '211': '面向21世纪重点建设约百所高校（共112所），涵盖教育部直属与地方重点大学，是考研、就业的常见门槛。',
+  '双一流': '世界一流大学和一流学科建设，2017年起逐步取代985/211成为国家现行官方分类，更强调学科实力。',
+  C9: '九校联盟（2009年组建）：北大、清华、复旦、上海交大、南大、浙大、中科大、哈工大、西安交大，中国首个顶尖大学联盟，俗称“中国常春藤”。',
+  E9: '卓越大学联盟（2010年组建）：北京理工、大连理工、东南大学、哈工大、华南理工、天津大学、同济大学、西北工大、重庆大学9所以卓越工科教育著称的985高校。',
+  '五院四系': '法学界的“黄埔军校”：五所政法院校（中国政法、西南政法、华东政法、西北政法、中南财经政法）+四所大学法学院（北大、人大、武大、吉大），法律行业认可度极高。',
+  '两电一邮': 'IT与电子信息行业三巨头：电子科技大学（成都）、西安电子科技大学、北京邮电大学；计算机/通信领域就业顶级，西电、北邮录取分常超不少985。',
+  '国防七子': '工信部直属的7所军工背景高校：北航、北理工、哈工大、哈工程、西北工大、南航、南京理工；航空航天、兵器、船舶等国防方向的就业首选。',
+  '八大美院': '传统八大美术名校：中央美院、中国美院、西安美院、四川美院、鲁迅美院、广州美院、湖北美院、天津美院，美术类考生的最高殿堂。',
+}
 const activeCat = ref<string>('')
 const hotSchools = ref<HotSchool[]>([])
 const hotLoading = ref(false)
@@ -132,19 +145,26 @@ onMounted(() => {
     <section class="hot" v-if="categories.length">
       <div class="hot__head">
         <h2 class="hot__title">热门大学介绍</h2>
-        <span class="hot__hint">按分类浏览「每日一校」卡片，点击查看完整信息</span>
+        <span class="hot__hint">按分类浏览「每日一校」卡片，点击查看完整信息；标签悬浮可看圈层解释</span>
       </div>
 
       <div class="hot__tabs">
-        <button
+        <el-tooltip
           v-for="c in categories"
           :key="c.category"
-          class="hot__tab"
-          :class="{ 'hot__tab--active': activeCat === c.category }"
-          @click="loadHot(c.category)"
+          :content="CAT_TIP[c.category]"
+          :disabled="!CAT_TIP[c.category]"
+          placement="top"
+          popper-class="cat-tip"
         >
-          {{ c.category }} <span class="hot__count">{{ c.count }}</span>
-        </button>
+          <button
+            class="hot__tab"
+            :class="{ 'hot__tab--active': activeCat === c.category }"
+            @click="loadHot(c.category)"
+          >
+            {{ c.category }} <span class="hot__count">{{ c.count }}</span>
+          </button>
+        </el-tooltip>
       </div>
 
       <div v-loading="hotLoading" class="hot__grid">
@@ -157,13 +177,20 @@ onMounted(() => {
         >
           <div class="hot__card-name">{{ s.name }}</div>
           <div class="hot__card-tags">
-            <el-tag
+            <el-tooltip
               v-for="cat in s.categories"
               :key="cat"
-              size="small"
-              effect="plain"
-              class="hot__cat"
-            >{{ cat }}</el-tag>
+              :content="CAT_TIP[cat]"
+              :disabled="!CAT_TIP[cat]"
+              placement="top"
+              popper-class="cat-tip"
+            >
+              <el-tag
+                size="small"
+                effect="plain"
+                class="hot__cat"
+              >{{ cat }}</el-tag>
+            </el-tooltip>
           </div>
           <div class="hot__card-meta">
             <span v-if="s.established" class="hot__dim">建校 {{ s.established }}</span>
@@ -186,12 +213,19 @@ onMounted(() => {
     >
       <div v-if="current" class="hot-detail">
         <div class="hot-detail__cats">
-          <el-tag
+          <el-tooltip
             v-for="cat in current.categories"
             :key="cat"
-            size="small"
-            effect="plain"
-          >{{ cat }}</el-tag>
+            :content="CAT_TIP[cat]"
+            :disabled="!CAT_TIP[cat]"
+            placement="top"
+            popper-class="cat-tip"
+          >
+            <el-tag
+              size="small"
+              effect="plain"
+            >{{ cat }}</el-tag>
+          </el-tooltip>
         </div>
 
         <el-image
@@ -325,4 +359,9 @@ onMounted(() => {
 .hot-detail__link { margin-top: var(--space-2); }
 .rank-tbl { margin-top: var(--space-1); }
 .dim { color: var(--color-text-muted); }
+</style>
+
+<!-- 圈层标签悬浮说明的全局样式（popper 渲染在 body 下，需非 scoped） -->
+<style>
+.cat-tip { max-width: 420px; line-height: 1.7; }
 </style>

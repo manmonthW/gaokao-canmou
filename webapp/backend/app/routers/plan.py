@@ -8,11 +8,19 @@ from urllib.parse import quote
 
 from fastapi import APIRouter
 from fastapi.responses import Response
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from app.services.plan_export import build_plan_xlsx
 
 router = APIRouter(prefix="/plan", tags=["plan"])
+
+
+def _empty_to_none(v):
+    """前端 localStorage 快照可能带空字符串（v-model.number 清空残留），
+    数值字段遇空白一律视为 null，避免 float/int 解析 422。"""
+    if isinstance(v, str) and not v.strip():
+        return None
+    return v
 
 
 class PlanExaminee(BaseModel):
@@ -22,6 +30,8 @@ class PlanExaminee(BaseModel):
     batch: str
     score: Optional[float] = None
     rank: Optional[int] = None
+
+    _clean_nums = field_validator("score", "rank", mode="before")(_empty_to_none)
 
 
 class PlanItem(BaseModel):
@@ -37,6 +47,10 @@ class PlanItem(BaseModel):
     level: Optional[str] = None
     city: Optional[str] = None
     note: Optional[str] = None
+
+    _clean_nums = field_validator(
+        "last_year", "last_year_score", "last_year_rank", "rank_diff_last",
+        mode="before")(_empty_to_none)
 
 
 class PlanExportRequest(BaseModel):
