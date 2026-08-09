@@ -1,0 +1,22 @@
+D2b 选科分层匹配 + 2027 选科三表两层过滤 + 工作台悬浮说明
+
+数据/ETL
+- 灌入 2027 选科要求三表（bk/zk/jx）：load_subject_requirements、load_material_phase1 增强
+- etl/audit_xk{,2,3}.py 别名审计 + verify_aliases.py 人工核验 20 对别名全部命中官方表
+- smoke_xk_layers.py 全池回归：核验覆盖 67.2%→89.6%（exact 67.9%/base 21.1%/enum 0.6%），
+  未收录 2155 拆分为 major_missing 1815 + school_missing 340；smoke_xk_api.py API 抽查
+
+后端 match.py
+- 分层查询：aliases → L0 精确 → L1 格式归一 → L2 基名(去()[]) → L3 枚举反查 → 校级兜底，
+  输出 subject_match_level 与 subject_status；歧义多要求全量返回、任一通过即保守放行
+- 两层硬过滤保留：首选不符无条件剔除；再选不符仅在提供再选科目时剔除
+- 未收录只告警不剔除（专业未收录/院校未收录差异化文案）
+
+前端
+- Match.vue 依据列四态标签（选科要求/院校未收录/专业未收录/已核验·不限/选科未核验）
+- Locate.vue 选科选择器；types.ts 增加 subject_match_level/subject_status
+
+测试与文档
+- tests/test_subject_match.py 10 例纯函数用例，pytest 47 全绿；smoke_p1p6.sh 全量冒烟更新
+- Workbench.vue 覆盖曲线「这图怎么画？」与策略基线三型悬浮说明（面向普通用户）
+- changelog §十五–§十七 记录口径与验证数字
