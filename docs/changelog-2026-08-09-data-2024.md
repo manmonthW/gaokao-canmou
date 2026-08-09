@@ -118,6 +118,10 @@ pair/margin_coverage/rel_delta 改为两对回测口径（2024→2025 92.1%/93.3
 skill reference.md §1 第 12 项与 SKILL.md Phase 2 残差项已补入
 「回测报告刷新后须同步 CLASSIFICATION_NOTE」，防止下次再漏。
 
+另修复 Locate.vue 底部文案：`refYearsText` 兜底误用 `slice(-2)` 只取最近两个
+数据年（显示「2025 / 2026」），改为取 /meta 全部历史数据年并升序展示，
+现显示「2024 / 2025 / 2026」；后端 reference_years 本就含全部年份，无需改。
+
 ## 结论
 
 margin 维持 0.85；2024–2026 三年数据全部在库并通过验证，2026.2 已发布，

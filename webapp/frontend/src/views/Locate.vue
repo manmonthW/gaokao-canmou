@@ -120,11 +120,11 @@ function goMatch() {
 
 const refYearsText = computed(() => {
   if (result.value?.reference_years?.length) {
-    return result.value.reference_years.join(' / ')
+    return [...result.value.reference_years].sort().join(' / ')
   }
-  // 兜底：取 /meta 最近两个数据年（年度接入免改文案）
+  // 兜底：取 /meta 全部历史数据年（年度接入免改文案）
   const ys = meta.value?.history_years as number[] | undefined
-  return ys?.length ? ys.slice(-2).join(' / ') : '2025 / 2026'
+  return ys?.length ? ys.join(' / ') : '2024 / 2025 / 2026'
 })
 </script>
 
