@@ -112,7 +112,9 @@ async def get_major_detail(name: str):
                   h.degree, h.length, h.gender_ratio, h.introduction,
                   h.subject_req, h.career, h.training_goal, h.discipline_req,
                   h.main_courses, h.postgrad_dir, h.employment_dir,
-                  h.hot_schools, h.image_path
+                  h.hot_schools, h.image_path,
+                  h.training_req, h.knowledge_ability, h.social_celebrities,
+                  h.arts_science_ratio, h.level_raw
            FROM major_catalog mc
            LEFT JOIN major_hot_profiles h ON h.name = mc.name
            WHERE mc.name=%s""",
@@ -122,7 +124,7 @@ async def get_major_detail(name: str):
         return None
 
     hot = None
-    if row[8] or row[16]:  # introduction 或 image_path 任一存在即视为有资料
+    if row[8] or row[16] or row[17] or row[18] or row[19]:  # 任一资料字段存在即有资料
         hot = {
             "degree": row[4],
             "length": row[5],
@@ -138,6 +140,11 @@ async def get_major_detail(name: str):
             "hot_schools": row[15] or [],
             "image_path": row[16],
             "has_image": bool(row[16]),
+            "training_req": row[17],
+            "knowledge_ability": row[18],
+            "social_celebrities": row[19],
+            "arts_science_ratio": row[20],
+            "level_raw": row[21],
         }
 
     return {

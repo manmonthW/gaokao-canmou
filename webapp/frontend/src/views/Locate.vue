@@ -4,7 +4,7 @@ import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { api } from '@/api/client'
 import { useProfile, EXAMINEE_YEAR } from '@/composables/useProfile'
-import type { RankContext, EstimateRankResponse } from '@/types'
+import type { RankContext, EstimateRankResponse, SubjectCombosResponse, SubjectCombo } from '@/types'
 import DataStatusBanner from '@/components/DataStatusBanner.vue'
 import StepGuide from '@/components/StepGuide.vue'
 
@@ -22,8 +22,32 @@ function onElectivesChange(v: string[]) {
   if (v.length > 2) profile.value.electives = v.slice(0, 2)
 }
 
+// ---------- 选科组合专业覆盖率联动（全国通用参考值，非辽宁专属口径） ----------
+const combos = ref<SubjectCombosResponse | null>(null)
+const comboDialog = ref(false)
+const comboView = ref<{ title: string; cid: string } | null>(null)
+const myCombo = computed<SubjectCombo | null>(() => {
+  const list = combos.value?.items || []
+  const first = profile.value.subject?.includes('物理') ? '物理'
+    : profile.value.subject?.includes('历史') ? '历史' : null
+  const els = [...(profile.value.electives || [])].sort()
+  if (!first || els.length !== 2) return null
+  return list.find((c) => c.first === first &&
+    c.electives.length === 2 &&
+    [...c.electives].sort().join('+') === els.join('+')) || null
+})
+function openComboDetail(c: SubjectCombo) {
+  comboView.value = { title: `${c.first} + ${c.electives.join(' + ')} · 专业覆盖率 ≈ ${c.coverage}%`, cid: c.id }
+  comboDialog.value = true
+}
+function openComboOverview() {
+  comboView.value = { title: '12 种选科组合专业覆盖率总览', cid: 'overview' }
+  comboDialog.value = true
+}
+
 onMounted(async () => {
   meta.value = await api.meta().catch(() => null)
+  combos.value = await api.subjectCombos().catch(() => null)
 })
 
 async function onSubmit() {
@@ -144,6 +168,23 @@ const refYearsText = computed(() =>
               2027 选科要求已入库：首选不符无条件排除，填再选后再选不符也排除
             </span>
           </el-form-item>
+        </div>
+        <!-- 选科组合覆盖率联动：首选 + 两门再选齐备时显示 -->
+        <div v-if="combos" class="combo-row">
+          <template v-if="myCombo">
+            <span class="combo-pill" @click="openComboDetail(myCombo)">
+              你的组合 <b>{{ myCombo.first }} + {{ myCombo.electives.join(' + ') }}</b>
+              · 专业覆盖率 ≈ <b class="tnum">{{ myCombo.coverage }}%</b>
+              <span class="combo-pill__view">看组合分析 →</span>
+            </span>
+          </template>
+          <span v-else class="combo-hint">
+            选好学科类与两门再选科目后，可查看该组合的专业覆盖率
+          </span>
+          <el-link v-if="combos.overview_available" type="primary" :underline="false" @click="openComboOverview">
+            12 种组合覆盖率总览
+          </el-link>
+          <span class="combo-note">{{ combos.note }}</span>
         </div>
         <div class="form__row">
           <el-form-item label="位次类型">
@@ -334,6 +375,17 @@ const refYearsText = computed(() =>
         <span>本工具以 <b>{{ refYearsText }}</b> 已完成录取的数据作为历史参考，服务于 <b>{{ EXAMINEE_YEAR }}</b> 年考生。随时可用右上角 <b>「资料库」</b> 查院校、查专业、看省控线与一分一段表。</span>
       </div>
     </el-card>
+
+    <!-- 选科组合分析图弹窗 -->
+    <el-dialog v-model="comboDialog" :title="comboView?.title || ''" width="min(920px, 94vw)" top="5vh">
+      <img
+        v-if="comboView"
+        :src="api.subjectComboImageUrl(comboView.cid)"
+        :alt="comboView.title"
+        class="combo-img"
+      />
+      <p class="hint">覆盖率为全国通用参考值（第三方整理），非辽宁省专属口径；实际可报范围以「智能匹配」的 2027 官方选科要求核验为准。</p>
+    </el-dialog>
   </div>
 </template>
 
@@ -344,6 +396,19 @@ const refYearsText = computed(() =>
 .card { margin-bottom: var(--space-4); border-radius: var(--radius-lg); box-shadow: var(--shadow-sm); }
 .form__row { display: flex; flex-wrap: wrap; gap: var(--space-4); align-items: flex-end; }
 .save-hint { font-size: var(--text-xs); color: var(--color-text-muted); margin: var(--space-2) 0 0; line-height: 1.7; }
+/* 选科组合覆盖率联动 */
+.combo-row { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-3); margin: var(--space-1) 0 0; }
+.combo-pill {
+  display: inline-flex; align-items: center; gap: var(--space-2);
+  padding: 6px 14px; border-radius: 999px; cursor: pointer;
+  background: var(--color-primary-soft); border: 1px solid var(--color-border);
+  font-size: var(--text-sm); color: var(--color-text-secondary);
+}
+.combo-pill b { color: var(--color-primary); }
+.combo-pill__view { font-size: var(--text-xs); color: var(--color-primary); }
+.combo-hint { font-size: var(--text-xs); color: var(--color-text-muted); }
+.combo-note { font-size: var(--text-xs); color: var(--color-text-muted); }
+.combo-img { width: 100%; border-radius: var(--radius-md); border: 1px solid var(--color-border); }
 .card__head { font-weight: 600; }
 
 /* 位次历史含义（主角卡） */

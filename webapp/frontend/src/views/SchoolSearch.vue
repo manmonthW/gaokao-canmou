@@ -132,6 +132,9 @@ onMounted(() => {
           <el-tag v-if="s.is_985" size="small" type="danger" effect="plain">985</el-tag>
           <el-tag v-if="s.is_211" size="small" type="warning" effect="plain">211</el-tag>
           <el-tag v-if="s.is_dfc" size="small" type="success" effect="plain">双一流</el-tag>
+          <el-tooltip v-if="s.postgrad_rate != null" content="保研率：本科毕业生获推免读研资格的比例（最新年口径，仅供参考）" placement="top">
+            <el-tag size="small" type="primary" effect="plain">保研 {{ s.postgrad_rate }}%</el-tag>
+          </el-tooltip>
           <span class="school__dim">{{ s.province }} · {{ s.city || '—' }}</span>
           <span class="school__dim" v-if="s.level">{{ s.level }}</span>
           <span class="school__dim" v-if="s.nature">{{ s.nature }}</span>

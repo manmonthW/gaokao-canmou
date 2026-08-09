@@ -82,10 +82,11 @@ function viewAdmission(name: string) {
           <img :src="api.hotImageUrl(data.name)" :alt="data.name" loading="lazy" />
         </div>
 
-        <div class="d-section" v-if="data.hot_profile.degree || data.hot_profile.length">
+        <div class="d-section" v-if="data.hot_profile.degree || data.hot_profile.length || data.hot_profile.arts_science_ratio || data.hot_profile.gender_ratio">
           <div class="d-grid">
             <div v-if="data.hot_profile.degree"><span class="d-k">授予学位</span><span class="d-v">{{ data.hot_profile.degree }}</span></div>
             <div v-if="data.hot_profile.length"><span class="d-k">学制</span><span class="d-v">{{ data.hot_profile.length }} 年</span></div>
+            <div v-if="data.hot_profile.arts_science_ratio"><span class="d-k">文理比例</span><span class="d-v">{{ data.hot_profile.arts_science_ratio }}</span></div>
             <div v-if="data.hot_profile.gender_ratio"><span class="d-k">男女比例</span><span class="d-v">{{ data.hot_profile.gender_ratio }}</span></div>
           </div>
         </div>
@@ -123,6 +124,21 @@ function viewAdmission(name: string) {
         <div class="d-section" v-if="data.hot_profile.postgrad_dir">
           <h4 class="d-h">考研方向</h4>
           <p class="d-p">{{ data.hot_profile.postgrad_dir }}</p>
+        </div>
+
+        <div class="d-section" v-if="data.hot_profile.training_req">
+          <h4 class="d-h">培养要求</h4>
+          <p class="d-p">{{ data.hot_profile.training_req }}</p>
+        </div>
+
+        <div class="d-section" v-if="data.hot_profile.knowledge_ability">
+          <h4 class="d-h">知识能力</h4>
+          <p class="d-p">{{ data.hot_profile.knowledge_ability }}</p>
+        </div>
+
+        <div class="d-section" v-if="data.hot_profile.social_celebrities">
+          <h4 class="d-h">社会名人</h4>
+          <p class="d-p">{{ data.hot_profile.social_celebrities }}</p>
         </div>
 
         <div class="d-section" v-if="data.hot_profile.hot_schools?.length">

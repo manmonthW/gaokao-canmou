@@ -156,6 +156,7 @@ export interface SchoolSummary {
   is_985: boolean | null
   is_211: boolean | null
   is_dfc: boolean | null
+  postgrad_rate: number | null   // 保研率（%，最新年口径）；null=无资格/缺失
 }
 
 export interface MajorSearchItem {
@@ -261,6 +262,7 @@ export interface SchoolProfile {
   note: string | null
   website: string | null
   intro: string | null
+  postgrad_rate: number | null   // 保研率（%，最新年口径）；null=无资格/缺失
 }
 
 export interface SchoolDetail {
@@ -445,6 +447,24 @@ export interface GuideGroup {
 export interface GuidesResponse {
   groups: GuideGroup[]
   total: number
+  note: string
+}
+
+// ------------------------------ 选科组合专业覆盖率（定位页联动） ------------------------------
+
+export interface SubjectCombo {
+  id: string
+  first: string          // 首选：物理 / 历史
+  electives: string[]    // 再选两门（排序后）
+  coverage: number       // 专业覆盖率（%，全国通用参考值）
+  image: string
+  available: boolean
+}
+
+export interface SubjectCombosResponse {
+  items: SubjectCombo[]
+  overview_image: string
+  overview_available: boolean
   note: string
 }
 

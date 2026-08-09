@@ -56,7 +56,10 @@ watch(() => route.params.code, (c) => { code.value = c as string; load() })
               <el-tag v-if="data.profile.is_985" size="small" type="danger" effect="plain">985</el-tag>
               <el-tag v-if="data.profile.is_211" size="small" type="warning" effect="plain">211</el-tag>
               <el-tag v-if="data.profile.is_dfc" size="small" type="success" effect="plain">双一流</el-tag>
-              <span v-if="!data.profile.is_985 && !data.profile.is_211 && !data.profile.is_dfc">—</span>
+              <el-tooltip v-if="data.profile.postgrad_rate != null" content="保研率：本科毕业生获推免读研资格的比例（最新年口径，仅供参考）" placement="top">
+                <el-tag size="small" type="primary" effect="plain">保研 {{ data.profile.postgrad_rate }}%</el-tag>
+              </el-tooltip>
+              <span v-if="!data.profile.is_985 && !data.profile.is_211 && !data.profile.is_dfc && data.profile.postgrad_rate == null">—</span>
             </span>
           </div>
           <div class="kv__item" v-if="data.profile.established"><span class="kv__k">建校年</span><span class="kv__v tnum">{{ data.profile.established }}</span></div>

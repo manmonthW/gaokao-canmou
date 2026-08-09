@@ -71,6 +71,7 @@ import type {
   SubjectReqSummary,
   PagedSubjectReqs,
   GuidesResponse,
+  SubjectCombosResponse,
   MatchResponse,
   SensitivityResponse,
   RankContext,
@@ -85,6 +86,10 @@ export const api = {
   dataStatus: () => getJson<DataStatusResponse>('/data-status'),
   dataStatusMatrix: () => getJson<DataStatusMatrix>('/data-status/matrix'),
   meta: () => getJson<MetaResponse>('/meta'),
+  // 选科组合专业覆盖率（12 组合 + 组合分析图）
+  subjectCombos: () => getJson<SubjectCombosResponse>('/meta/subject-combos'),
+  subjectComboImageUrl: (cid: string) =>
+    `${ORIGIN}${PREFIX}/meta/subject-combos/${encodeURIComponent(cid)}/image`,
   locateSummary: (p: Record<string, unknown>) =>
     getJson<LocateSummary>(`/locate/summary${buildQuery(p)}`),
   rankContext: (p: Record<string, unknown>) =>

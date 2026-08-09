@@ -12,7 +12,7 @@ async def get_school(code: str):
         """SELECT province, city, affiliation, level, nature, type,
                   is_985, is_211, is_dfc, established, strength,
                   school_style, employment_region, rank_ref, note,
-                  website, intro
+                  website, intro, postgrad_recommend_rate
            FROM school_profiles WHERE code=%s""", (code,))
     city = None
     if prof and prof[1]:
@@ -58,6 +58,7 @@ async def get_school(code: str):
             "school_style": prof[11], "employment_region": prof[12],
             "rank_ref": prof[13], "note": prof[14],
             "website": prof[15], "intro": prof[16],
+            "postgrad_rate": float(prof[17]) if prof[17] is not None else None,
         } if prof else None),
         "city": city,
         "yearly_summary": [

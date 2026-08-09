@@ -13,7 +13,7 @@ async def search_schools(q: str, limit: int = 20):
     rows = await db.fetch_all(
         """SELECT s.code, s.name,
                   sp.province, sp.city, sp.level, sp.nature, sp.type,
-                  sp.is_985, sp.is_211, sp.is_dfc
+                  sp.is_985, sp.is_211, sp.is_dfc, sp.postgrad_recommend_rate
            FROM schools s
            LEFT JOIN school_profiles sp ON s.code = sp.code
            WHERE s.name ILIKE %s OR s.code ILIKE %s
@@ -26,6 +26,7 @@ async def search_schools(q: str, limit: int = 20):
             "code": r[0], "name": r[1],
             "province": r[2], "city": r[3], "level": r[4], "nature": r[5],
             "type": r[6], "is_985": r[7], "is_211": r[8], "is_dfc": r[9],
+            "postgrad_rate": float(r[10]) if r[10] is not None else None,
         }
         for r in rows
     ]

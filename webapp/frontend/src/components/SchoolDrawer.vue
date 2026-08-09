@@ -74,6 +74,9 @@ function openFullPage() {
           <el-tag v-if="data.profile.is_985" size="small" type="danger" effect="plain">985</el-tag>
           <el-tag v-if="data.profile.is_211" size="small" type="warning" effect="plain">211</el-tag>
           <el-tag v-if="data.profile.is_dfc" size="small" type="success" effect="plain">双一流</el-tag>
+          <el-tooltip v-if="data.profile.postgrad_rate != null" content="保研率：本科毕业生获推免读研资格的比例（最新年口径，仅供参考）" placement="top">
+            <el-tag size="small" type="primary" effect="plain">保研 {{ data.profile.postgrad_rate }}%</el-tag>
+          </el-tooltip>
         </div>
         <div class="kv">
           <div><span class="k">省份/城市</span><span class="v">{{ data.profile.province || '—' }} · {{ data.profile.city || '—' }}</span></div>
