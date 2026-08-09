@@ -16,6 +16,12 @@ const result = ref<RankContext | null>(null)
 const loading = ref(false)
 const error = ref<string | null>(null)
 
+// 再选科目（与匹配页同一档案，最多 2 门）
+const ELECTIVES = ['化学', '生物', '政治', '地理']
+function onElectivesChange(v: string[]) {
+  if (v.length > 2) profile.value.electives = v.slice(0, 2)
+}
+
 onMounted(async () => {
   meta.value = await api.meta().catch(() => null)
 })
@@ -121,6 +127,22 @@ const refYearsText = computed(() =>
             <el-select v-model="profile.batch" style="width: 160px" clearable>
               <el-option v-for="b in (meta?.batches || [])" :key="b" :label="b" :value="b" />
             </el-select>
+          </el-form-item>
+          <el-form-item label="再选科目">
+            <el-select
+              v-model="profile.electives"
+              multiple
+              collapse-tags
+              clearable
+              style="width: 200px"
+              placeholder="选填，最多 2 门"
+              @change="onElectivesChange"
+            >
+              <el-option v-for="e in ELECTIVES" :key="e" :label="e" :value="e" />
+            </el-select>
+            <span style="margin-left: 8px; font-size: 12px; color: #909399;">
+              2027 选科要求已入库：首选不符无条件排除，填再选后再选不符也排除
+            </span>
           </el-form-item>
         </div>
         <div class="form__row">

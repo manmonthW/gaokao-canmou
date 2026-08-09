@@ -103,6 +103,28 @@ print('post(admitted 无序号) ->', bad)
 s = get('/feedback/summary')
 print('summary:', json.dumps(s, ensure_ascii=False))
 
+# ---- D2b 选科要求（2027 官方三表） ----
+line('D2b 选科要求硬过滤 + 行级展示')
+x = get('/match', {'year': 2027, 'category': cat, 'subject': '物理学科类', 'batch': batch,
+                   'rank_lo': 11000, 'rank_hi': 13000, 'electives': '化学,生物',
+                   'page': 1, 'page_size': 5})
+assert x.get('subject_requirements_loaded'), '选科要求应已入库'
+assert (x.get('excluded_re') or 0) > 0, '要求思想政治的单元应被排除'
+print('物理类+化学/生物: excluded:', x['excluded_by_subject'],
+      '(首选', x.get('excluded_first'), '/ 再选', x.get('excluded_re'), ')',
+      '| 首页 subject_req:', [i.get('subject_req') for i in x.get('items', [])])
+h = get('/match', {'year': 2027, 'category': cat, 'subject': '历史学科类', 'batch': batch,
+                   'rank': 3000, 'electives': '政治,地理', 'page': 1, 'page_size': 5})
+assert (h.get('excluded_first') or 0) > 0, '历史类应排除首选物理的单元'
+print('历史类+政治/地理: excluded:', h['excluded_by_subject'],
+      '(首选', h.get('excluded_first'), '/ 再选', h.get('excluded_re'), ')')
+h0 = get('/match', {'year': 2027, 'category': cat, 'subject': '历史学科类', 'batch': batch,
+                    'rank': 3000, 'page': 1, 'page_size': 5})
+assert (h0.get('excluded_first') or 0) > 0, '首选过滤应无条件生效（未填再选）'
+assert (h0.get('excluded_re') or 0) == 0, '未填再选不应排除再选不符'
+print('历史类·未填再选: excluded:', h0['excluded_by_subject'],
+      '(首选', h0.get('excluded_first'), '/ 再选', h0.get('excluded_re'), ')')
+
 # ---- P6 往年征集参考 ----
 line('P6 /datacenter/collection-reference')
 d = get('/datacenter/collection-reference', {'category': cat, 'subject': '物理学科类',

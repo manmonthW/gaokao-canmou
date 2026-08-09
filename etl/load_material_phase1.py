@@ -172,37 +172,61 @@ def load_a3(conn):
     print(f"[A3] 标记保研资格 {hit} 所")
 
 
-# ---------- B6: 辽宁选考科目 xlsx ----------
+# ---------- B6: 辽宁选考科目 xlsx（本科/专科/军校三表） ----------
 def load_b6(conn):
-    path = os.path.join(BASE, "2027lnzsxkap0407jx.xlsx")
-    wb = openpyxl.load_workbook(path, read_only=True, data_only=True)
-    ws = wb[wb.sheetnames[0]]
     cur = conn.cursor()
     cur.execute("SELECT code, name FROM schools")
     name2code = {n: c for c, n in cur.fetchall()}
-    rows = list(ws.iter_rows(values_only=True))
-    hdr = rows[0]
-    n = 0
-    for row in rows[1:]:
-        if not row or not row[1]:
+    total = 0
+    for tag in ("bk", "zk", "jx"):
+        path = os.path.join(BASE, f"2027lnzsxkap0407{tag}.xlsx")
+        if not os.path.exists(path):
+            print(f"[B6] 缺文件 {tag}，跳过")
             continue
-        sch_name = str(row[1]).strip()
-        major_code = str(row[2]).strip() if row[2] else None
-        major_name = str(row[3]).strip() if row[3] else None
-        subject_req = str(row[4]).strip() if row[4] else None
-        code = name2code.get(sch_name)
-        if not code or not major_name:
+        wb = openpyxl.load_workbook(path, read_only=True, data_only=True)
+        ws = wb[wb.sheetnames[0]]
+        rows = list(ws.iter_rows(values_only=True))
+        wb.close()
+        header = [str(c).strip() if c else "" for c in rows[0]]
+
+        def idx(*names):
+            for i, h in enumerate(header):
+                if h in names:
+                    return i
+            return None
+
+        i_name = idx("院校名称")
+        i_mc = idx("招生专业代码", "专业代码")
+        i_mn = idx("招生专业名称", "专业名称")
+        i_req = idx("选考科目要求")
+        if i_name is None or i_req is None:
+            print(f"[B6] {tag} 表头不识别，跳过：{header}")
             continue
-        # upsert 到 major_profiles（按 院校代码+专业名+年份 维度）
-        cur.execute("""
-            INSERT INTO major_profiles (school_code, major_code, major_name, year, subject_req, source, enriched_at)
-            VALUES (%s,%s,%s,2025,%s,'ln_zk_xlsx',now())
-            ON CONFLICT (school_code, major_code, major_name, year, category)
-            DO UPDATE SET subject_req=EXCLUDED.subject_req, source='ln_zk_xlsx', enriched_at=now()
-        """, (code, major_code, major_name, subject_req))
-        n += 1
+        n = 0
+        for row in rows[1:]:
+            if not row or not row[i_name]:
+                continue
+            sch_name = str(row[i_name]).strip()
+            major_code = str(row[i_mc]).strip() if i_mc is not None and row[i_mc] else None
+            major_name = str(row[i_mn]).strip() if i_mn is not None and row[i_mn] else None
+            subject_req = str(row[i_req]).strip() if row[i_req] else None
+            # 口径：major_profiles.school_code 为省内报考代码，须用 schools 表映射
+            # （官方文件给的是国标码，不能直接入库）
+            code = name2code.get(sch_name)
+            if not code or not major_name:
+                continue
+            # upsert 到 major_profiles（按 院校代码+专业码+专业名+年份 维度）
+            cur.execute("""
+                INSERT INTO major_profiles (school_code, major_code, major_name, year, subject_req, source, enriched_at)
+                VALUES (%s,%s,%s,2025,%s,'ln_xk_2027',now())
+                ON CONFLICT (school_code, major_code, major_name, year, category)
+                DO UPDATE SET subject_req=EXCLUDED.subject_req, source='ln_xk_2027', enriched_at=now()
+            """, (code, major_code, major_name, subject_req))
+            n += 1
+        total += n
+        print(f"[B6] {tag}: 写入/更新 {n} 条 subject_req")
     conn.commit()
-    print(f"[B6] 写入/更新 major_profiles.subject_req {n} 条")
+    print(f"[B6] 累计写入/更新 major_profiles.subject_req {total} 条")
 
 
 # ---------- B7: 专业目录 2026（纯文本层级格式）----------

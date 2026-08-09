@@ -23,6 +23,14 @@ const RISK_COLOR: Record<RiskLabel, string> = {
   高波动: 'var(--color-volatile)', 数据不足: 'var(--color-insufficient)',
 }
 
+// ---------- 面向普通用户的悬浮说明（覆盖曲线画图逻辑 / 策略基线） ----------
+const CURVE_TIP = '这张图怎么画：① 每个点＝一个志愿，点的高度＝该院校+专业「历史最难年」的投档门槛位次（2025/2026 里录取最难的一年，取保守口径）；② 虚线＝你的位次：线上方＝最难年门槛也比你好，属冲击区；紧贴线下方＝稳档区（最可能录取）；远低于线＝保底区；③ 点的颜色是最终档位判定（还会综合考虑波动、数据完整度等），高度只是判定依据之一，所以个别「稳」的点略高于线是正常的（最难年够不着、但历史中位够得着）；④ 健康的志愿表曲线应按 冲→稳→保 单调下沉，尾部全是保档。'
+const STRATEGY_TIPS: Record<PlanStrategy, string> = {
+  冲击: '冲击型：冲约36% / 稳29% / 保35%。愿意用更多冲刺槽位博更好学校，但保底安全垫不缩水；适合能接受「用滑到更低一档的可能、换更好学校机会」的考生。',
+  均衡: '均衡型：冲20% / 稳50% / 保30%。稳档占一半作主体，兼顾「博好学校」和「不滑档」，是最常见的建议比例。',
+  稳妥: '稳妥型：冲10% / 稳55% / 保35%。冲刺只留一成梦想位，九成放在稳+保；适合「宁可学校低一点、也不冒滑档风险」的考生。',
+}
+
 function fmt(n: number | null | undefined) {
   return n == null ? '—' : n.toLocaleString()
 }
@@ -430,11 +438,13 @@ async function exportPlan(p: VolunteerPlan) {
             </el-select>
             <el-input v-model="newPlanName" placeholder="新方案名" style="width: 180px" @keyup.enter="createPlan" />
             <el-button @click="createPlan">新建方案</el-button>
-            <el-select v-model="tplStrategy" size="small" style="width: 104px">
-              <el-option value="冲击" label="冲击型" />
-              <el-option value="均衡" label="均衡型" />
-              <el-option value="稳妥" label="稳妥型" />
-            </el-select>
+            <el-tooltip content="一键梯度模板按此策略基线决定冲/稳/保配比；各型含义见下方「策略基线」悬浮说明" placement="top" popper-class="wb-tip">
+              <el-select v-model="tplStrategy" size="small" style="width: 104px">
+                <el-option value="冲击" label="冲击型" />
+                <el-option value="均衡" label="均衡型" />
+                <el-option value="稳妥" label="稳妥型" />
+              </el-select>
+            </el-tooltip>
             <el-tooltip content="从收藏池按所选策略基线（冲/稳/保配比）一键生成骨架方案（教学性模板，需自行补全至 112 个）" placement="top">
               <el-button type="success" plain @click="generateTemplate">一键梯度模板</el-button>
             </el-tooltip>
@@ -455,19 +465,30 @@ async function exportPlan(p: VolunteerPlan) {
               创建于 {{ activePlan.created_at }} · 数据版本 {{ activePlan.data_version || '—' }}
             </div>
             <div class="plan-meta">
-              策略基线：
+              <el-tooltip content="三个数字是「冲/稳/保」建议占比：任何类型保底都恒定在 35% 左右（防滑档安全垫），只有冲的比例随风险偏好变化。该基线用于方案体检配比校验与一键梯度模板。" placement="top" popper-class="wb-tip">
+                <span class="help-q">策略基线？</span>
+              </el-tooltip>
               <el-radio-group v-model="planStrategy" size="small">
-                <el-radio-button value="冲击">冲击型 36/29/35</el-radio-button>
-                <el-radio-button value="均衡">均衡型 20/50/30</el-radio-button>
-                <el-radio-button value="稳妥">稳妥型 10/55/35</el-radio-button>
+                <el-tooltip :content="STRATEGY_TIPS['冲击']" placement="top" popper-class="wb-tip">
+                  <el-radio-button value="冲击">冲击型 36/29/35</el-radio-button>
+                </el-tooltip>
+                <el-tooltip :content="STRATEGY_TIPS['均衡']" placement="top" popper-class="wb-tip">
+                  <el-radio-button value="均衡">均衡型 20/50/30</el-radio-button>
+                </el-tooltip>
+                <el-tooltip :content="STRATEGY_TIPS['稳妥']" placement="top" popper-class="wb-tip">
+                  <el-radio-button value="稳妥">稳妥型 10/55/35</el-radio-button>
+                </el-tooltip>
               </el-radio-group>
-              <span class="muted">用于方案体检配比校验与一键梯度模板（保底 ~35% 恒定，冲的比例取决于风险偏好）</span>
+              <span class="muted">用于方案体检配比校验与一键梯度模板（悬停各型查看含义）</span>
             </div>
 
             <!-- P2a 整表覆盖曲线：志愿序号 × 历史门槛位次，叠加考生位次（区间）水平线 -->
             <el-card v-if="curve" class="card curve-card" shadow="never">
               <template #header>
-                <div class="card__head"><span>整表覆盖曲线</span>
+                <div class="card__head"><span class="curve-title">整表覆盖曲线
+                  <el-tooltip :content="CURVE_TIP" placement="top" popper-class="wb-tip">
+                    <span class="help-q">这图怎么画？</span>
+                  </el-tooltip></span>
                   <span class="muted">纵轴＝最难年门槛位次（对数，分档基准）：冲在虚线上方、稳紧贴线下（最可能录取）、保沉底；整体应单调下沉</span>
                 </div>
               </template>
@@ -723,4 +744,18 @@ async function exportPlan(p: VolunteerPlan) {
 .curve__wen-label { font-size: 10px; font-weight: 700; fill: var(--color-primary); paint-order: stroke; stroke: #fff; stroke-width: 3px; }
 .curve-legend__zone--wen { background: var(--el-color-primary-light-9); }
 .curve-legend__hint { margin-left: auto; color: var(--color-text-muted); }
+</style>
+
+<style>
+/* 悬浮说明 popper 挂载在 body，需全局样式 */
+.wb-tip { max-width: 460px; line-height: 1.7; }
+.help-q {
+  color: var(--color-primary);
+  font-size: var(--text-xs);
+  font-weight: 400;
+  cursor: help;
+  border-bottom: 1px dashed var(--color-primary);
+  margin-left: var(--space-2);
+}
+.curve-title { display: inline-flex; align-items: baseline; }
 </style>

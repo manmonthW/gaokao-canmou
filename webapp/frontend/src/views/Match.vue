@@ -479,7 +479,10 @@ onMounted(async () => {
         {{ batchContextText }}
       </el-alert>
       <p v-if="data.excluded_by_subject" class="subj-note">
-        已按再选科目排除 {{ data.excluded_by_subject }} 个不符合选科要求的单元。
+        已按选科要求排除 {{ data.excluded_by_subject }} 个单元（首选不符 {{ data.excluded_first ?? 0 }}、再选不符 {{ data.excluded_re ?? 0 }}）；首选为投档硬约束，与是否填写再选无关。
+      </p>
+      <p v-else-if="data.subject_requirements_loaded && !profile.electives?.length" class="subj-note">
+        2027 选科要求已收录：填写「再选科目」后，将自动排除不符合选科要求的单元。
       </p>
 
       <!-- 分档规则与位次敏感度：① 怎么判的 ② 位次若有偏差会怎样（A2/A3） -->
@@ -696,6 +699,20 @@ onMounted(async () => {
               <el-tag v-if="row.risk === '保' && row.safe_band" size="small" effect="plain"
                 :type="row.safe_band === '标准保底' ? 'success' : row.safe_band === '极稳垫底' ? 'info' : 'warning'">{{ row.safe_band }}</el-tag>
               <el-tag v-if="row.over_reach" size="small" type="danger" effect="plain">超冲</el-tag>
+              <el-tag v-if="row.subject_req" size="small" effect="plain" type="info">选科 {{ row.subject_req }}</el-tag>
+              <el-tooltip v-else-if="row.subject_status === 'school_missing'"
+                content="该院校未出现在 2027 官方选科要求表中，2027 年可能不在辽招生，请重点核实" placement="top">
+                <el-tag size="small" effect="plain" type="danger">院校未收录</el-tag>
+              </el-tooltip>
+              <el-tooltip v-else-if="row.subject_status === 'major_missing'"
+                content="该院校在 2027 官方选科要求表中，但该专业未列出，2027 年可能停招或更名，请重点核实" placement="top">
+                <el-tag size="small" effect="plain" type="warning">专业未收录</el-tag>
+              </el-tooltip>
+              <el-tooltip v-else-if="row.subject_match_level"
+                content="已匹配官方选科表，该专业不提选科要求（任意首选/再选均可报）" placement="top">
+                <el-tag size="small" effect="plain" type="success">已核验·不限</el-tag>
+              </el-tooltip>
+              <el-tag v-else-if="row.subject_unverified" size="small" effect="plain" type="warning">选科未核验</el-tag>
               {{ row.risk_reason }}
               <el-tooltip
                 v-if="data.interval && row.risk_lo && row.risk_lo !== row.risk"

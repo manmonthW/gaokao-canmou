@@ -435,6 +435,12 @@ export interface MatchCandidate {
   warning: string | null
   flags: string[]
   subject_unverified?: boolean
+  /** 2027 官方选科要求展示串（再选原文/首选），无要求为 null */
+  subject_req?: string | null
+  /** 选科匹配层级：exact 精确 / norm 归一 / base 基础名 / enum 枚举反查 / school 院校级 */
+  subject_match_level?: 'exact' | 'norm' | 'base' | 'enum' | 'school' | null
+  /** 未收录拆分：major_missing 专业未收录（学校在表）/ school_missing 院校未收录 */
+  subject_status?: 'major_missing' | 'school_missing'
   yearly: MatchYearly[]
 }
 
@@ -497,6 +503,10 @@ export interface MatchResponse {
   batch_context?: BatchContext
   classification_note?: ClassificationNote
   excluded_by_subject?: number
+  /** 首选不符排除数（无条件生效） */
+  excluded_first?: number
+  /** 再选不符排除数（填了再选才生效） */
+  excluded_re?: number
   subject_requirements_loaded?: boolean
   error?: string
 }
@@ -517,6 +527,8 @@ export interface ClassificationNote {
 export interface SensitivityResponse {
   examinee: MatchExaminee
   excluded_by_subject: number
+  excluded_first?: number
+  excluded_re?: number
   subject_requirements_loaded: boolean
   scenarios: {
     label: string

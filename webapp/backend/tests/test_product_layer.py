@@ -192,3 +192,19 @@ def test_pref_sort_certainty_nearest_first():
     assert msvc._pref_sort_key(near985, None) < msvc._pref_sort_key(nearOrd, None)
     # 偏好模式次键同样用接近度：level 模式同层次内浅保底先于深保底
     assert msvc._pref_sort_key(shallow, "level") < msvc._pref_sort_key(deep, "level")
+
+
+def test_re_req_modes_and_display():
+    """D2b：再选校验均须/任一模式 + 官方原文与前端短名命中 + 展示串。"""
+    # 均须模式：两门都在才过
+    assert msvc._re_req_ok("化学,生物(2门科目考生均须选考方可报考)", ["化学", "生物"])
+    assert not msvc._re_req_ok("化学,生物(2门科目考生均须选考方可报考)", ["生物", "地理"])
+    # 任一模式（官方「选考其中一门」）：命中一门即过
+    assert msvc._re_req_ok("化学,生物(2门科目考生选考其中一门即可报考)", ["生物", "地理"])
+    assert not msvc._re_req_ok("化学,生物(2门科目考生选考其中一门即可报考)", ["政治", "地理"])
+    # 思想政治官方原文命中前端再选短名「政治」
+    assert msvc._re_req_ok("思想政治(1门科目考生必须选考方可报考)", ["政治", "地理"])
+    # 展示串：再选原文优先；仅首选时标首选；无要求不展示
+    assert msvc._req_display([("物理", "化学(2门科目考生均须选考方可报考)")]) == "化学(2门科目考生均须选考方可报考)"
+    assert msvc._req_display([("物理", None)]) == "首选物理"
+    assert msvc._req_display([("不限", None)]) is None

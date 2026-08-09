@@ -24,6 +24,8 @@ A1–A4 算法层增强（2026-08-08，依据 first-principles-review.md §5.2�
   - 历史跨 2025/2026 两年；考生位次与历史位次直接用「位次法」比较
     （R <= lowest_rank 表示考生位次优于该门槛，等价的分数更高）。
 """
+import re
+from collections import defaultdict
 from statistics import median
 from typing import Optional
 
@@ -131,16 +133,154 @@ def _first_req_ok(first_req, subject):
 
 
 def _re_req_ok(re_req, electives):
-    """启发式校验再选要求（官方表头确定前的保守实现）：
-    空/不限 → 通过；含「选 1/或」→ 任一命中；否则需全部命中。"""
+    """启发式校验再选要求：空/不限 → 通过；
+    含「选1/或/其中一门」→ 任一命中；否则需全部命中。"""
     if not re_req or "不限" in re_req:
         return True
     tokens = [s for s in _SUBJECTS if s in re_req]
     if not tokens:
         return True
-    if "选1" in re_req.replace(" ", "") or "或" in re_req:
+    norm = re_req.replace(" ", "")
+    if "选1" in norm or "或" in re_req or "其中一门" in norm:
         return any(t in electives for t in tokens)
     return all(t in electives for t in tokens)
+
+
+def _req_display(reqs):
+    """选科要求展示串：再选原文优先，其次首选；多记录去重后用 / 连接。"""
+    parts = []
+    for fr, rr in reqs:
+        p = rr if rr else (f"首选{fr}" if fr and fr != "不限" else None)
+        if p and p not in parts:
+            parts.append(p)
+    return " / ".join(parts) if parts else None
+
+
+# ---------- 选科要求分层匹配（D2b 增强，audit_xk 审计定稿） ----------
+# 投档库用更名后校名，2027 官方选科表仍用旧名；别名对经人工逐一核对
+# （etl/audit_xk3.py 候选 + etl/verify_aliases.py 存在性验证）。
+SCHOOL_ALIASES = {
+    # 2026 更名（官方表沿用旧名）
+    "吉林化工大学": "吉林化工学院",
+    "天水师范大学": "天水师范学院",
+    "湖南理工大学": "湖南理工学院",
+    "湖州师范大学": "湖州师范学院",
+    "闽江大学": "闽江学院",
+    "赤峰大学": "赤峰学院",
+    "西藏农牧大学": "西藏农牧学院",
+    "桂林医科大学": "桂林医学院",
+    "应急管理大学": "华北科技学院",
+    # 职业大学升级（官方表沿用学院名）
+    "武汉职业技术大学": "武汉职业技术学院",
+    "成都航空职业技术大学": "成都航空职业技术学院",
+    "吉林铁道职业技术大学": "吉林铁道职业技术学院",
+    "酒泉职业技术大学": "酒泉职业技术学院",
+    "深圳信息职业技术大学": "深圳信息职业技术学院",
+    "黄河水利职业技术大学": "黄河水利职业技术学院",
+    "黑龙江农业工程职业技术大学": "黑龙江农业工程职业学院",
+    "长春职业技术大学": "长春职业技术学院",
+    "兴安职业技术大学": "兴安职业技术学院",
+    "新疆工业职业技术大学": "新疆工业职业技术学院",
+    # 投档库笔误
+    "辽宁师范大学高等专科学校": "辽宁师范高等专科学校",
+}
+
+_XK_FULL2HALF = {"（": "(", "）": ")", "，": ",", "、": ",",
+                 "【": "[", "】": "]", "　": "", " ": ""}
+_XK_PAREN = re.compile(r"\([^()]*\)|\[[^\[\]]*\]")
+_XK_TOKEN_SPLIT = re.compile(r"[、,;；]+")
+# 括号组内明显非专业名的词（试验班/专项/合作办学等），不进枚举反查
+_XK_TOKEN_SKIP = ("班", "计划", "民族", "合作", "学位", "师范", "定向",
+                  "学院", "校区", "办学", "项目", "委托", "订单", "培优",
+                  "领军", "卓越")
+
+
+def _xk_norm(s):
+    """L1 格式归一化：去空白、全角括号/逗号统一为半角。"""
+    if not s:
+        return ""
+    t = str(s).strip()
+    for a, b in _XK_FULL2HALF.items():
+        t = t.replace(a, b)
+    return t
+
+
+def _xk_base(s):
+    """L2 基础名：归一后反复剥掉圆括号/方括号组（兼容嵌套）。"""
+    t = _xk_norm(s)
+    while True:
+        t2 = _XK_PAREN.sub("", t).strip(" -,，、")
+        if t2 == t:
+            return t2
+        t = t2
+
+
+def _xk_enum_tokens(s):
+    """L3 枚举反查：从括号/方括号组内提取候选专业 token（大类枚举式招生名）。"""
+    toks = []
+    for a, b in re.findall(r"\(([^()]*)\)|\[([^\[\]]*)\]", _xk_norm(s)):
+        for g in (a, b):
+            if not g:
+                continue
+            for t in _XK_TOKEN_SPLIT.split(g):
+                t = _xk_base(t)
+                if len(t) < 3 or any(k in t for k in _XK_TOKEN_SKIP):
+                    continue
+                toks.append(t)
+    return toks
+
+
+def build_req_indexes(req_rows):
+    """对官方选科表行 (school_code, school_name, major_name, first_req, re_req)
+    建多层索引：raw 精确 / norm 归一 / base 基础名 / 校内 base、raw 反查 /
+    院校级空专业行 / 在表学校集合。"""
+    idx = {"raw": {}, "norm": {}, "base": {},
+           "school_base": defaultdict(dict), "school_raw": defaultdict(dict),
+           "school_level": {}, "schools": set()}
+    for _sc, sn, mn, fr, rr in req_rows:
+        sn1 = _xk_norm(sn)
+        idx["schools"].add(sn1)
+        pair = (fr, rr)
+        if not mn:
+            idx["school_level"].setdefault(sn1, set()).add(pair)
+            continue
+        idx["raw"].setdefault((sn, mn), set()).add(pair)
+        idx["norm"].setdefault((sn1, _xk_norm(mn)), set()).add(pair)
+        idx["base"].setdefault((sn1, _xk_base(mn)), set()).add(pair)
+        idx["school_base"][sn1].setdefault(_xk_base(mn), set()).add(pair)
+        idx["school_raw"][sn1][_xk_norm(mn)] = pair
+    return idx
+
+
+def lookup_reqs(idx, school, major):
+    """分层查找选科要求：别名 → L0 精确 → L1 归一 → L2 基础名 → L3 枚举反查
+    → 院校级行兜底。返回 (pairs 列表, level, school_known)；
+    level ∈ exact/norm/base/enum/school，未命中为 None。
+    同一键多要求（歧义）时全部返回，资格校验按 any-pass 保守处理。"""
+    sn0 = _xk_norm(school)
+    sn1 = SCHOOL_ALIASES.get(sn0, sn0)
+    school_known = sn1 in idx["schools"] or sn1 in idx["school_level"]
+    if major:
+        exact = idx["raw"].get((school, major)) or idx["raw"].get((sn1, major))
+        for pairs, level in ((exact, "exact"),
+                             (idx["norm"].get((sn1, _xk_norm(major))), "norm"),
+                             (idx["base"].get((sn1, _xk_base(major))), "base")):
+            if pairs:
+                return sorted(pairs, key=lambda p: (str(p[0]), str(p[1]))), level, school_known
+        pairs = set()
+        sb = idx["school_base"].get(sn1, {})
+        sr = idx["school_raw"].get(sn1, {})
+        for tok in _xk_enum_tokens(major):
+            if tok in sb:
+                pairs |= sb[tok]
+            elif tok in sr:
+                pairs.add(sr[tok])
+        if pairs:
+            return sorted(pairs, key=lambda p: (str(p[0]), str(p[1]))), "enum", school_known
+    lvl = idx["school_level"].get(sn1)
+    if lvl:
+        return sorted(lvl, key=lambda p: (str(p[0]), str(p[1]))), "school", school_known
+    return None, None, school_known
 
 
 async def get_data_version() -> Optional[str]:
@@ -327,7 +467,7 @@ async def _prepare_candidates(
     exclude_flags=None, electives=None, cfg,
 ):
     """第 2–4 步 + 选科校验 + 偏好筛选：返回筛选后候选（match 与 sensitivity 共用，A3）。
-    返回 (filtered, candidates_all, excluded_by_subject, subjreq_loaded)。"""
+    返回 (filtered, candidates_all, excluded_first, excluded_re, subjreq_loaded)。"""
     # ---------- 第二步：资格/数据过滤 ----------
     # 包含 lowest_rank 为空行（库内约 570 行）：这些归入「数据不足」档，
     # 按 roadmap 要求降级为「分数参考」并显式标注，而非直接丢弃。
@@ -431,42 +571,54 @@ async def _prepare_candidates(
     # ---------- 第四步之后：构造候选 ----------
     candidates = [_build_candidate(u, rank, cfg) for u in units.values()]
 
-    # ---------- 选科资格校验（D2b）：仅当该年选科要求已入库时启用 ----------
-    excluded_by_subject = 0
+    # ---------- 选科资格校验（D2b） ----------
+    # 首选不匹配无条件排除（学科类已知，首选是投档硬约束）；
+    # 再选不匹配仅当填了再选才排除（用户私有信息）；
+    # 已入库即挂展示/未核验标记。
+    excluded_first = 0
+    excluded_re = 0
     subjreq_loaded = False
-    if electives:
-        cnt = await db.fetch_one(
-            "SELECT count(*) FROM subject_requirements WHERE year=%s", (year,))
-        if cnt and cnt[0] > 0:
-            subjreq_loaded = True
-            req_rows = await db.fetch_all(
-                """SELECT school_code, school_name, major_name, first_req, re_req
-                   FROM subject_requirements WHERE year=%s""", (year,))
-            # (school_code, major_name) 级优先；major_name 为空的行视为院校级兑底
-            req_by_unit, req_by_school = {}, {}
-            for sc, sn, mn, fr, rr in req_rows:
-                if mn:
-                    req_by_unit[(sc, mn)] = (fr, rr)
-                else:
-                    req_by_school.setdefault(sc, []).append((fr, rr))
-            kept = []
-            for c in candidates:
-                req = req_by_unit.get((c["school_code"], c["major_name"]))
-                reqs = [req] if req else req_by_school.get(c["school_code"], [])
-                if not reqs:
-                    # 无记录：不默认「可报」，显式标注未核验
-                    c["subject_unverified"] = True
-                    w = "选科要求未收录，请自行核对官方选科要求。"
-                    c["warning"] = f"{c['warning']} {w}" if c["warning"] else w
-                    kept.append(c)
+    cnt = await db.fetch_one(
+        "SELECT count(*) FROM subject_requirements WHERE year=%s", (year,))
+    if cnt and cnt[0] > 0:
+        subjreq_loaded = True
+        req_rows = await db.fetch_all(
+            """SELECT school_code, school_name, major_name, first_req, re_req
+               FROM subject_requirements WHERE year=%s""", (year,))
+        # 口径：官方文件用国标院校代码，投档库用省内报考代码 → 以 school_name 联结；
+        # 分层匹配（别名→精确→归一→基础名→枚举反查，audit_xk 审计覆盖率 ≈89%）；
+        # 未收录拆分「专业未收录」（学校在表）/「院校未收录」（学校不在表），
+        # 一律不排除、仅警示（2027 计划可能调整，保守优先）。
+        idx = build_req_indexes(req_rows)
+        kept = []
+        for c in candidates:
+            reqs, level, school_known = lookup_reqs(
+                idx, c["school_name"], c["major_name"])
+            c["subject_match_level"] = level
+            if reqs:
+                disp = _req_display(reqs)
+                if disp:
+                    c["subject_req"] = disp
+                if not any(_first_req_ok(fr, subject) for fr, rr in reqs):
+                    excluded_first += 1
                     continue
-                ok = any(_first_req_ok(fr, subject) and _re_req_ok(rr, electives)
-                         for fr, rr in reqs)
-                if ok:
-                    kept.append(c)
-                else:
-                    excluded_by_subject += 1
-            candidates = kept
+                if electives and not any(
+                        _re_req_ok(rr, electives)
+                        for fr, rr in reqs if _first_req_ok(fr, subject)):
+                    excluded_re += 1
+                    continue
+            else:
+                c["subject_unverified"] = True
+                c["subject_status"] = ("major_missing" if school_known
+                                       else "school_missing")
+                if electives:
+                    # 无记录：不默认「可报」，显式标注未核验
+                    w = ("选科要求未收录（该专业未列入官方表），请自行核对官方选科要求。"
+                         if school_known else
+                         "选科要求未收录（该院校未列入官方表），2027 年可能不在辽招生，请重点核实。")
+                    c["warning"] = f"{c['warning']} {w}" if c["warning"] else w
+            kept.append(c)
+        candidates = kept
 
     # 应用偏好筛选（省/市/层次/性质/类型/专业关键词/两年均有/排除标记）
     def keep(c):
@@ -489,7 +641,7 @@ async def _prepare_candidates(
         return True
 
     filtered = [c for c in candidates if keep(c)]
-    return filtered, candidates, excluded_by_subject, subjreq_loaded
+    return filtered, candidates, excluded_first, excluded_re, subjreq_loaded
 
 
 def _risk_at(c: dict, R: int, cfg: dict):
@@ -555,7 +707,7 @@ async def sensitivity(
     rank = await _resolve_rank(year, category, subject, rank, score)
     if rank is None or rank <= 0:
         return {"error": "请提供有效位次（正整数），或有效的分数以便反查位次。"}
-    filtered, _, excluded_by_subject, subjreq_loaded = await _prepare_candidates(
+    filtered, _, excluded_first, excluded_re, subjreq_loaded = await _prepare_candidates(
         category=category, subject=subject, batch=batch, year=year, rank=rank,
         province=province, city=city, level=level, nature=nature, type_=type_,
         major_keyword=major_keyword, has_both_years=has_both_years,
@@ -571,7 +723,9 @@ async def sensitivity(
     return {
         "examinee": {"year": year, "category": category, "subject": subject,
                      "batch": batch, "score": score, "rank": rank},
-        "excluded_by_subject": excluded_by_subject,
+        "excluded_by_subject": excluded_first + excluded_re,
+        "excluded_first": excluded_first,
+        "excluded_re": excluded_re,
         "subject_requirements_loaded": subjreq_loaded,
         "scenarios": scenarios,
         "note": ("试算基于同一候选集与分档规则（含安全边际），仅改变考生位次，"
@@ -636,7 +790,7 @@ async def match(
         }
 
     # ---------- 第 2–4 步 + 选科校验 + 偏好筛选（与 sensitivity 共用，A3） ----------
-    filtered, candidates, excluded_by_subject, subjreq_loaded = await _prepare_candidates(
+    filtered, candidates, excluded_first, excluded_re, subjreq_loaded = await _prepare_candidates(
         category=category, subject=subject, batch=batch, year=year, rank=rank,
         province=province, city=city, level=level, nature=nature, type_=type_,
         major_keyword=major_keyword, has_both_years=has_both_years,
@@ -743,7 +897,9 @@ async def match(
         "interval": interval,
         "totals": totals,
         "totals_lo": totals_lo,
-        "excluded_by_subject": excluded_by_subject,
+        "excluded_by_subject": excluded_first + excluded_re,
+        "excluded_first": excluded_first,
+        "excluded_re": excluded_re,
         "subject_requirements_loaded": subjreq_loaded,
         "classification_note": CLASSIFICATION_NOTE,
         "batch_context": batch_context,
