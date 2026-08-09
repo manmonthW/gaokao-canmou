@@ -32,9 +32,11 @@ def process(path, dry=False, conn=None):
             meta["sheet"] = sheet
             recs, ok = parse_sheet(rows)
             for r in recs:
-                r.update({k: meta.get(k) for k in
-                          ("year", "category", "batch",
-                           "is_collection", "subject")})
+                # 记录自带的字段（如 PDF 逐行学科类）优先，缺失才用文件级 meta
+                for k in ("year", "category", "batch",
+                          "is_collection", "subject"):
+                    if r.get(k) is None:
+                        r[k] = meta.get(k)
             all_recs += recs
             sheets_meta.append((sheet, meta, len(recs)))
             print(f"  SHEET {sheet}: meta={meta} rows={len(recs)}")
@@ -54,9 +56,11 @@ def process(path, dry=False, conn=None):
         meta = infer_meta(blob, filename)
         recs = parse_pdf_text(pages, meta)
         for r in recs:
-            r.update({k: meta.get(k) for k in
-                      ("year", "category", "batch",
-                       "is_collection", "subject")})
+            # 记录自带的字段（逐行学科类）优先，缺失才用文件级 meta
+            for k in ("year", "category", "batch",
+                      "is_collection", "subject"):
+                if r.get(k) is None:
+                    r[k] = meta.get(k)
         print(f"  PDF pages={len(pages)} records={len(recs)} meta={meta}")
         if dry:
             if recs:
@@ -71,6 +75,8 @@ def main():
                     help="只解析打印，不写库")
     ap.add_argument("--no-pdf", action="store_true",
                     help="跳过 PDF（OCR 较慢），仅处理表格")
+    ap.add_argument("--year",
+                    help="仅处理指定年份目录（如 2024），避免误刷其他年份")
     args = ap.parse_args()
 
     conn = None if args.dry_run else load.get_conn()
@@ -78,6 +84,8 @@ def main():
     errs = 0
     for path in readers.iter_files():
         if args.no_pdf and os.path.splitext(path)[1].lower() == ".pdf":
+            continue
+        if args.year and os.path.basename(os.path.dirname(path)) != args.year:
             continue
         try:
             process(path, dry=args.dry_run, conn=conn)

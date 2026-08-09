@@ -520,6 +520,9 @@ async def _prepare_candidates(
             u["rank_years"].add(y)  # A4：有位次的年份（与 n_years 同源）
 
     # ---------- 第四步：历史统计 ----------
+    # 「最近两个数据年」动态口径：取当前查询结果中最大的两个年份，
+    # 新一年接入后无需改代码；数据不足两年时 has_both_years 均为 False。
+    last_two = sorted({r[0] for r in rows})[-2:]
     for u in units.values():
         yrs = sorted(set(u["years"]))
         ranks = sorted(u["ranks"])
@@ -534,7 +537,8 @@ async def _prepare_candidates(
             u["best_rank"] = u["worst_rank"] = u["median_rank"] = u["span"] = None
         # A4 口径统一：has_both_years 与 n_years 均基于「有最低位次的年份」，
         # 避免某年位次缺失时 has_both_years=True 但 n_years=1 的展示矛盾。
-        u["has_both_years"] = (2025 in u["rank_years"] and 2026 in u["rank_years"])
+        u["has_both_years"] = (
+            len(last_two) == 2 and set(last_two) <= u["rank_years"])
         u["continuous"] = (yrs == list(range(yrs[0], yrs[0] + len(yrs))))
         u["break_detected"] = (
             len(ranks) >= 2

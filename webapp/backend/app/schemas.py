@@ -39,6 +39,9 @@ class DataStatusResponse(BaseModel):
 
 class MetaResponse(BaseModel):
     years: List[int] = []
+    examinee_year: Optional[int] = None  # 考生年（最新数据年+1）
+    last_year: Optional[int] = None      # 最新数据年
+    history_years: List[int] = []        # 全部历史数据年（同 years）
     categories: List[str] = []
     subjects: List[str] = []
     batches: List[str] = []

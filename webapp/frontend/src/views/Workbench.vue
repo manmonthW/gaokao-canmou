@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { api } from '@/api/client'
 import { useProfile } from '@/composables/useProfile'
@@ -14,6 +14,12 @@ const { favorites, compareIds, plans } = planner
 
 const activeTab = ref<'fav' | 'compare' | 'plans'>('plans')
 
+// 元数据：仅用于列头/文案里的年份动态渲染（年度接入免改文案）
+const meta = ref<any>(null)
+onMounted(async () => {
+  meta.value = await api.meta().catch(() => null)
+})
+
 const RISK_TYPE: Record<RiskLabel, string> = {
   保: 'success', 稳: 'primary', 冲: 'warning', 高波动: 'danger', 数据不足: 'info',
 }
@@ -24,7 +30,7 @@ const RISK_COLOR: Record<RiskLabel, string> = {
 }
 
 // ---------- 面向普通用户的悬浮说明（覆盖曲线画图逻辑 / 策略基线） ----------
-const CURVE_TIP = '这张图怎么画：① 每个点＝一个志愿，点的高度＝该院校+专业「历史最难年」的投档门槛位次（2025/2026 里录取最难的一年，取保守口径）；② 虚线＝你的位次：线上方＝最难年门槛也比你好，属冲击区；紧贴线下方＝稳档区（最可能录取）；远低于线＝保底区；③ 点的颜色是最终档位判定（还会综合考虑波动、数据完整度等），高度只是判定依据之一，所以个别「稳」的点略高于线是正常的（最难年够不着、但历史中位够得着）；④ 健康的志愿表曲线应按 冲→稳→保 单调下沉，尾部全是保档。'
+const CURVE_TIP = '这张图怎么画：① 每个点＝一个志愿，点的高度＝该院校+专业「历史最难年」的投档门槛位次（历年数据里录取最难的一年，取保守口径）；② 虚线＝你的位次：线上方＝最难年门槛也比你好，属冲击区；紧贴线下方＝稳档区（最可能录取）；远低于线＝保底区；③ 点的颜色是最终档位判定（还会综合考虑波动、数据完整度等），高度只是判定依据之一，所以个别「稳」的点略高于线是正常的（最难年够不着、但历史中位够得着）；④ 健康的志愿表曲线应按 冲→稳→保 单调下沉，尾部全是保档。'
 const STRATEGY_TIPS: Record<PlanStrategy, string> = {
   冲击: '冲击型：冲约36% / 稳29% / 保35%。愿意用更多冲刺槽位博更好学校，但保底安全垫不缩水；适合能接受「用滑到更低一档的可能、换更好学校机会」的考生。',
   均衡: '均衡型：冲20% / 稳50% / 保30%。稳档占一半作主体，兼顾「博好学校」和「不滑档」，是最常见的建议比例。',
@@ -379,7 +385,7 @@ async function exportPlan(p: VolunteerPlan) {
             <el-table-column label="城市" width="110">
               <template #default="{ row }">{{ row.province }}{{ row.city ? '·' + row.city : '' }}</template>
             </el-table-column>
-            <el-table-column label="近年最低位次（2026）" width="130" align="right">
+            <el-table-column :label="`近年最低位次${meta?.last_year ? '（' + meta.last_year + '）' : ''}`" width="130" align="right">
               <template #default="{ row }"><span class="tnum">{{ fmt(row.last_year_rank) }}</span></template>
             </el-table-column>
             <el-table-column label="位次差" width="110" align="center">
@@ -569,7 +575,7 @@ async function exportPlan(p: VolunteerPlan) {
               </el-table-column>
               <el-table-column prop="school_name" label="院校" min-width="150" show-overflow-tooltip />
               <el-table-column prop="major_name" label="专业" min-width="150" show-overflow-tooltip />
-              <el-table-column label="2026最低分/位次" width="150" align="right">
+              <el-table-column :label="`${meta?.last_year ?? ''}最低分/位次`" width="150" align="right">
                 <template #default="{ row }">
                   <span class="tnum">{{ row.last_year_score ?? '—' }}</span> /
                   <span class="tnum">{{ fmt(row.last_year_rank) }}</span>

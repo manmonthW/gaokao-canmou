@@ -127,7 +127,7 @@ def build_records(base_dir=BASE):
     不采用 PDF 内被水印污染的"累计"列，改由 count 重算，可消除水印造成的个别坏值。
     """
     recs = []
-    for year in ["2025", "2026"]:
+    for year in ["2024", "2025", "2026"]:
         d = os.path.join(base_dir, year)
         for path in sorted(glob.glob(os.path.join(d, "*.pdf"))):
             title, rows = parse_pdf(path)

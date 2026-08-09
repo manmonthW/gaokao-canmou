@@ -30,6 +30,7 @@ dist/
 # 数百 MB 的图片/PDF 素材库
 2026allmaterial/
 # 原始下载的分数文件（PDF/xls/xlsx/md），体积大且非源码
+2024/
 2025/
 2026/
 etl/score_rank_pdf/
@@ -46,4 +47,3 @@ etl/enrich_review.jsonl
 .idea/
 .vscode/
 .qoder/
-.git_commit_msg*.tmpn

@@ -693,7 +693,7 @@ onMounted(async () => {
           </el-table-column>
           <el-table-column label="最难年 / 最近年位次" width="150" align="right">
             <template #header>
-              <el-tooltip content="最难年＝历史最难一年的门槛位次（冲/稳/保的分档基准，保守口径）；最近年＝2026 年门槛。两者差距大＝门槛断崖变易，分档从严按最难年。" placement="top">
+              <el-tooltip :content="`最难年＝历史最难一年的门槛位次（冲/稳/保的分档基准，保守口径）；最近年＝${meta?.last_year ?? ''} 年门槛。两者差距大＝门槛断崖变易，分档从严按最难年。`" placement="top">
                 <span class="th-help">最难年 / 最近年位次</span>
               </el-tooltip>
             </template>

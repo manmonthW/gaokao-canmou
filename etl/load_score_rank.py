@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """将辽宁高考「成绩统计表(一分一段表)」加载进 PostgreSQL 的 score_rank 表。
 
-数据来源：etl/score_rank_pdf/{2025,2026}/*.pdf
+数据来源：etl/score_rank_pdf/{2024,2025,2026}/*.pdf
 （沈阳本地宝镜像辽宁招生考试之窗官方发布，文字版 PDF，由 parse_score_rank 解析）。
 重算累计位次由 count 累加得到，已规避水印污染。
 

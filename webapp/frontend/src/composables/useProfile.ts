@@ -5,7 +5,8 @@ const STORAGE_KEY = 'ln-zhiyuan-profile'
 
 /**
  * 考生所在年份：固定为「今年」，是隐含常量，不作为用户可选项。
- * 2025/2026 一律作为历史参考年（见 locate 服务 rank_context）。
+ * 历史数据年（当前 2024/2025/2026）一律作为历史参考年（见 locate 服务 rank_context）。
+ * 权威值以后端 /meta.examinee_year（最新数据年+1）为准，此处常量仅兜底。
  * 说明：profile.year 字段仍保留，仅用于后端需要 year 的旧接口（如 match 内部
  * score→rank 反查），其值恒等于 EXAMINEE_YEAR，用户不再手动切换。
  */
@@ -30,7 +31,7 @@ function load(): ExamineeProfile {
   try {
     const raw = localStorage.getItem(STORAGE_KEY)
     if (!raw) return { ...defaultProfile }
-    // 强制 year 为 EXAMINEE_YEAR：历史存档里可能残留 2025/2026
+    // 强制 year 为 EXAMINEE_YEAR：历史存档里可能残留旧数据年
     const p = { ...defaultProfile, ...JSON.parse(raw), year: EXAMINEE_YEAR }
     if (!Array.isArray(p.electives)) p.electives = []
     return p

@@ -118,11 +118,14 @@ function goMatch() {
   router.push('/match')
 }
 
-const refYearsText = computed(() =>
-  result.value?.reference_years?.length
-    ? result.value.reference_years.join(' / ')
-    : '2025 / 2026',
-)
+const refYearsText = computed(() => {
+  if (result.value?.reference_years?.length) {
+    return result.value.reference_years.join(' / ')
+  }
+  // 兜底：取 /meta 最近两个数据年（年度接入免改文案）
+  const ys = meta.value?.history_years as number[] | undefined
+  return ys?.length ? ys.slice(-2).join(' / ') : '2025 / 2026'
+})
 </script>
 
 <template>

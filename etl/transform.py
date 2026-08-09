@@ -169,6 +169,16 @@ def parse_sheet(rows):
 
 
 _NUM = re.compile(r"^\d+(?:\.\d+)?$")
+# 院校编号：行首或「物理/历史学科类」前缀之后（征集表数据行），
+# 允许 1-2 位字母前缀（P018/JV02/JX25/Q432 等）+ 2-6 位 ASCII 数字。
+# 注意：lookaround 必须用 [0-9.] 而非 \d —— Python 的 \d 是 Unicode
+# 数字类，「学科类」的「类」也是 \d，会把紧跟前缀的校码误排除。
+_CODE = re.compile(r"(?<![0-9.])([A-Z]{0,2}[0-9]{2,6})(?![0-9.])")
+# 提前批第一次投档行：编号 + 校名 + 单个总分（无同分排序项）
+_TQ_LINE = re.compile(r"^([A-Z]{0,2}[0-9]{2,6})\s+([^0-9]+?)\s+([0-9]{3}(?:\.[0-9]+)?)\s*$")
+# 提前批综合评价院校行：仅编号 + 校名，无投档线（与 2025 表格入库的
+# NULL 分行为同一先例）
+_TQ_NOSCORE = re.compile(r"^([A-Z]{0,2}[0-9]{2,6})\s+([^0-9]+?)\s*$")
 
 
 def parse_pdf_text(pages, meta):
@@ -179,9 +189,38 @@ def parse_pdf_text(pages, meta):
             line = line.strip()
             if not line:
                 continue
-            toks = re.split(r"[\s|/]+", line)
+            # 校码先定位：行首优先；否则行内搜（征集行以学科类开头）。
+            # 校码本身是纯数字，必须先摘除再数数，否则会被计入
+            # 数字序列，导致同分排序项整体错位。
+            m = re.match(r"^([A-Z]{0,2}[0-9]{2,6})\b", line)
+            if not m:
+                m = _CODE.search(line)
+            code = m.group(1) if m else None
+            toks = re.split(r"[\s|/]+", line[m.end():] if m else line)
             nums = [t for t in toks if _NUM.match(t)]
             if len(nums) < 8:
+                # 提前批第一次投档：仅「编号 + 校名 + 总分」，
+                # 官方不提供同分排序项；综合评价院校无投档线记 NULL
+                if meta.get("batch") and "提前批" in meta["batch"]:
+                    mq = _TQ_LINE.match(line)
+                    score = float(mq.group(3)) if mq else None
+                    if not mq:
+                        mq = _TQ_NOSCORE.match(line)
+                    if mq:
+                        records.append({
+                            "school_code": mq.group(1),
+                            "school_name": re.sub(r"[^\u4e00-\u9fffA-Za-z]",
+                                                  "", mq.group(2)),
+                            "major_code": None,
+                            "major_name": None,
+                            "score_kind": "投档最低分",
+                            "lowest_score": score,
+                            "tb1": None, "tb2": None, "tb3": None,
+                            "tb4": None, "tb5": None, "tb6": None,
+                            "tb7": None,
+                            "raw_row": {"ocr_line": line},
+                            "ocr_page": page,
+                        })
                 continue
             # 定位最后一个长度>=8 的连续数字段作为分数块
             runs, cur = [], []
@@ -207,25 +246,36 @@ def parse_pdf_text(pages, meta):
                 continue
             lowest = float(block[0])
             tbs = [float(x) for x in block[1:8]]
-            # 校码：行首 3-6 位数字
-            m = re.match(r"^(\d{3,6})\b", line)
-            code = m.group(1) if m else None
-            # 校名：校码之后、分数块之前的文字，仅保留中文/字母
+            # 逐行学科类：征集表同一文件内混排两学科类，行首带前缀
+            subject = None
+            if line.startswith("历史学科类"):
+                subject = "历史学科类"
+            elif line.startswith("物理学科类"):
+                subject = "物理学科类"
+            # 校名/专业：校码之后、分数块之前的文字；若校码后紧跟
+            # 专业代号（如 4Q/0X/D2），代号前为校名，代号后为专业名
+            major_code = None
+            major_name = None
             name = ""
             if code:
-                rest = line[line.index(code) + len(code):]
-                # 截到分数块起点
+                rest = line[m.end():]
                 sb = score_run[0]
                 if sb in rest:
                     rest = rest[:rest.index(sb)]
+                pm = re.search(r"\s([0-9A-Z]{2})\s", rest)
+                if pm:
+                    major_code = pm.group(1)
+                    major_name = re.sub(r"\s+", "", rest[pm.end():]) or None
+                    rest = rest[:pm.start()]
                 name = re.sub(r"[^\u4e00-\u9fffA-Za-z]", "", rest)
             if not code or not name:
                 continue
             records.append({
                 "school_code": code,
                 "school_name": name,
-                "major_code": None,
-                "major_name": None,
+                "major_code": major_code,
+                "major_name": major_name,
+                "subject": subject,
                 "score_kind": "投档最低分",
                 "lowest_score": lowest,
                 "tb1": tbs[0], "tb2": tbs[1], "tb3": tbs[2],

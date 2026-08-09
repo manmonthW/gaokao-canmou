@@ -44,8 +44,15 @@ async def get_meta():
     for cat, bat in batch_by_cat_rows:
         batches_by_category.setdefault(cat, []).append(bat)
 
+    # 年份语义字段（年度接入免改前端）：
+    # last_year=最新数据年，examinee_year=考生年（最新数据年+1）。
+    year_vals = [r[0] for r in years]
+
     return {
-        "years": [r[0] for r in years],
+        "years": year_vals,
+        "examinee_year": (year_vals[-1] + 1) if year_vals else None,
+        "last_year": year_vals[-1] if year_vals else None,
+        "history_years": year_vals,
         "categories": [r[0] for r in categories],
         "subjects": [r[0] for r in subjects],
         "batches": [r[0] for r in batches],

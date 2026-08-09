@@ -36,6 +36,12 @@ export interface DataStatusResponse {
 
 export interface MetaResponse {
   years: number[]
+  /** 考生年（最新数据年+1），前端 EXAMINEE_YEAR 常量仅兜底 */
+  examinee_year?: number
+  /** 最新数据年（如 2026） */
+  last_year?: number
+  /** 全部历史数据年（同 years，语义别名） */
+  history_years?: number[]
   categories: string[]
   subjects: string[]
   batches: string[]
