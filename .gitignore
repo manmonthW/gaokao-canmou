@@ -46,3 +46,4 @@ etl/enrich_review.jsonl
 .idea/
 .vscode/
 .qoder/
+.git_commit_msg*.tmpn
