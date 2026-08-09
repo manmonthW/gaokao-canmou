@@ -107,6 +107,17 @@
 - 冒烟确认：`/data-status` 返回 2026.2；`/match` data_version=2026.2；
 - 残差 4 文件用户决定暂不修复，保持现状（已记录在上节）。
 
+## 补修（2026-08-10）：CLASSIFICATION_NOTE 回测文案漏改
+
+Phase 2 耦合点清单遗漏一项：`match.py` 的 `CLASSIFICATION_NOTE`（智能匹配页
+「查看每档具体怎么算 + 回测数据」）是手工固化字面量，接入 2024 后只刷新了
+backtest_report.txt 而未同步用户文案（仍写单对 2025→2026）。已修复：
+pair/margin_coverage/rel_delta 改为两对回测口径（2024→2025 92.1%/93.3%，
+6,858/1,951 单元；2025→2026 91.6%/92.4% 不变），模块 docstring 改「历史跨
+2024/2025/2026 三年」；重启后端冒烟确认 /match 返回新文案，pytest 47 全绿。
+skill reference.md §1 第 12 项与 SKILL.md Phase 2 残差项已补入
+「回测报告刷新后须同步 CLASSIFICATION_NOTE」，防止下次再漏。
+
 ## 结论
 
 margin 维持 0.85；2024–2026 三年数据全部在库并通过验证，2026.2 已发布，
