@@ -1,8 +1,28 @@
 from fastapi import APIRouter, Query
-from typing import Optional
+from typing import List, Optional
+from pydantic import BaseModel
 from app.services import match as svc
 
 router = APIRouter(prefix="/match", tags=["match"])
+
+
+class RefreshItem(BaseModel):
+    school_code: str
+    major_code: Optional[str] = None
+    major_name: Optional[str] = None
+    batch: str
+
+
+class RefreshRequest(BaseModel):
+    year: int
+    category: str
+    subject: str
+    batch: str
+    rank: Optional[int] = None
+    score: Optional[int] = None
+    rank_lo: Optional[int] = None
+    rank_hi: Optional[int] = None
+    items: List[RefreshItem]
 
 
 @router.get("")
@@ -45,6 +65,17 @@ async def match(
         if electives else None,
         pref_sort=pref_sort,
         page=page, page_size=page_size,
+    )
+
+
+@router.post("/refresh")
+async def refresh(req: RefreshRequest):
+    """工作台「刷新到最新数据」：年度接入后旧方案快照缺新年数据，
+    按方案条目逐单元用最新全量数据重算 yearly/位次/分档。"""
+    return await svc.refresh_snapshots(
+        year=req.year, category=req.category, subject=req.subject, batch=req.batch,
+        rank=req.rank, score=req.score, rank_lo=req.rank_lo, rank_hi=req.rank_hi,
+        items=[i.model_dump() for i in req.items],
     )
 
 

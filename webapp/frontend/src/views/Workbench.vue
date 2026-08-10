@@ -3,7 +3,7 @@ import { ref, computed, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { api } from '@/api/client'
 import { useProfile } from '@/composables/useProfile'
-import { usePlanner, STRATEGY_BASELINES } from '@/composables/usePlanner'
+import { usePlanner, STRATEGY_BASELINES, toSnapshot, candidateId } from '@/composables/usePlanner'
 import type { CandidateSnapshot, PlanEntry, PlanStrategy, RiskLabel, VolunteerPlan } from '@/types'
 import DataStatusBanner from '@/components/DataStatusBanner.vue'
 import StepGuide from '@/components/StepGuide.vue'
@@ -112,6 +112,52 @@ const curveMode = computed<CurveMode>(() => {
 // 叠加细线调色板（按年份升序：蓝/橙/绿，未来新增年份循环取色）
 const OVERLAY_COLORS = ['#409eff', '#e6a23c', '#67c23a', '#909399', '#f56c6c']
 
+// ---------- 快照滞后检测与刷新（年度接入后旧方案缺新年数据） ----------
+// 快照在加入时冻结（spec §5.2.6）：若方案建于 2024 接入前，yearly 只有 2025/2026，
+// 分年视图就缺 2024。检测「库内已有但快照没有」的年份，提供一键刷新重算。
+const staleYears = computed(() =>
+  (meta.value?.history_years ?? []).filter((y: number) => !availableYears.value.includes(y)))
+const planStale = computed(() =>
+  !!activePlan.value && activePlan.value.entries.length > 0 && staleYears.value.length > 0)
+const refreshing = ref(false)
+async function refreshPlanData() {
+  const p = activePlan.value
+  if (!p || refreshing.value) return
+  refreshing.value = true
+  try {
+    const ex = p.examinee
+    const resp = await api.matchRefresh({
+      year: ex.year, category: ex.category, subject: ex.subject, batch: ex.batch,
+      ...(ex.rank_mode === 'interval' && ex.rank_lo && ex.rank_hi
+        ? { rank_lo: ex.rank_lo, rank_hi: ex.rank_hi }
+        : { rank: ex.rank ?? undefined }),
+      score: ex.score ?? undefined,
+      items: p.entries.map((e) => ({
+        school_code: e.school_code, major_code: e.major_code,
+        major_name: e.major_name, batch: e.batch,
+      })),
+    })
+    if (resp.error) { ElMessage.warning(resp.error); return }
+    const byId = new Map(resp.items.map((c) => [candidateId(c), c]))
+    const rank = ex.rank ?? ex.rank_hi ?? null
+    let n = 0
+    for (const e of p.entries) {
+      const c = byId.get(e.id)
+      if (!c) continue
+      const note = e.note
+      Object.assign(e, toSnapshot(c, resp.data_version, rank), { note })
+      n++
+    }
+    p.data_version = resp.data_version
+    const missed = p.entries.length - n
+    ElMessage.success(`已刷新 ${n} 个志愿到数据版本 ${resp.data_version ?? '—'}${missed ? `；${missed} 个在当前口径下未找到（保持原样）` : ''}`)
+  } catch (e) {
+    ElMessage.error((e as Error).message)
+  } finally {
+    refreshing.value = false
+  }
+}
+
 const curveHeadNote = computed(() => {
   const mode = curveMode.value
   if (typeof mode === 'number') {
@@ -217,7 +263,7 @@ const curve = computed(() => {
   for (let i = 1; i <= n; i += step) xTicks.push({ x: +x(i).toFixed(1), label: i })
   if ((n - 1) % step !== 0) xTicks.push({ x: +x(n).toFixed(1), label: n })
   return {
-    W, H, padL, right: W - padR, bottom, line, area, ticks: ticksShown, xTicks, wenBand,
+    W, H, padL, padT, right: W - padR, bottom, line, area, ticks: ticksShown, xTicks, wenBand,
     circles: pts.map((d) => ({ cx: +x(d.i).toFixed(1), cy: +y(d.y).toFixed(1), risk: d.risk, over: d.over, far: d.far, label: typeof mode === 'number' ? `第 ${d.i} 位 ${d.name}（${mode} 年门槛 ${d.y.toLocaleString()}）` : `第 ${d.i} 位 ${d.name}（最难年 ${d.y.toLocaleString()}${d.last != null && d.last !== d.y ? ` / 最近年 ${d.last.toLocaleString()}` : ''}${d.over ? ' · 过深保底：保护已饱和' : d.far ? ' · 超冲：差距过大' : ''}）` })),
     gaps: gaps.map((d) => ({ cx: +x(d.i).toFixed(1), label: `第 ${d.i} 位 ${d.name}（${mode} 年无数据）` })),
     overlays,
@@ -562,6 +608,16 @@ async function exportPlan(p: VolunteerPlan) {
               <span class="muted">用于方案体检配比校验与一键梯度模板（悬停各型查看含义）</span>
             </div>
 
+            <!-- 快照滞后提示：年度接入后旧方案缺新年数据，一键刷新重算 -->
+            <el-alert v-if="planStale" type="warning" :closable="false" class="stale-alert">
+              <div class="stale-alert__body">
+                <span>方案快照在加入时冻结（数据版本 {{ activePlan.data_version || '—' }}），缺少后接入的 <b>{{ staleYears.join('、') }}</b> 年：曲线分年视图不全，分档也按旧数据计算。</span>
+                <el-tooltip content="按最新全量数据（含新接入年份）重算方案内每个志愿的历年门槛与冲/稳/保分档，更新快照与数据版本；不影响志愿顺序与备注。" placement="top" popper-class="wb-tip">
+                  <el-button size="small" type="warning" :loading="refreshing" @click="refreshPlanData">刷新到最新数据</el-button>
+                </el-tooltip>
+              </div>
+            </el-alert>
+
             <!-- P2a 整表覆盖曲线：志愿序号 × 历史门槛位次，叠加考生位次（区间）水平线 -->
             <el-card v-if="curve || curveNote" class="card curve-card" shadow="never">
               <template #header>
@@ -748,6 +804,8 @@ async function exportPlan(p: VolunteerPlan) {
 .card { margin-bottom: var(--space-4); border-radius: var(--radius-lg); box-shadow: var(--shadow-sm); }
 
 /* 方案体检卡（置顶） */
+.stale-alert { margin-bottom: var(--space-3); border-radius: var(--radius-md, 8px); }
+.stale-alert__body { display: flex; align-items: center; gap: var(--space-3); flex-wrap: wrap; }
 .checkup {
   margin-bottom: var(--space-5);
   border-radius: var(--radius-lg);

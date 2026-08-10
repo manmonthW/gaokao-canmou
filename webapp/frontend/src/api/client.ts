@@ -74,6 +74,7 @@ import type {
   SubjectCombosResponse,
   MatchResponse,
   SensitivityResponse,
+  RefreshSnapshotsResponse,
   RankContext,
   AuthUser,
   AuthResult,
@@ -135,11 +136,13 @@ export const api = {
   // 报考说明（官方招考文件在线阅读）
   guides: () => getJson<GuidesResponse>('/guides'),
   guidePdfUrl: (id: string) => `${ORIGIN}${PREFIX}/guides/${encodeURIComponent(id)}/pdf`,
-  guideHtmlUrl: (id: string) => `${ORIGIN}${PREFIX}/guides/${encodeURIComponent(id)}/html`,
   match: (p: Record<string, unknown>) =>
     getJson<MatchResponse>(`/match${buildQuery(p)}`),
   matchSensitivity: (p: Record<string, unknown>) =>
     getJson<SensitivityResponse>(`/match/sensitivity${buildQuery(p)}`),
+  // 工作台「刷新到最新数据」：旧方案快照补新年 yearly/位次/分档
+  matchRefresh: (payload: Record<string, unknown>) =>
+    sendJson<RefreshSnapshotsResponse>('POST', '/match/refresh', payload),
   // ---- 热门大学介绍 ----
   hotSchoolCategories: () =>
     getJson<{ categories: HotSchoolCategory[]; total: number }>('/hot-schools/categories'),

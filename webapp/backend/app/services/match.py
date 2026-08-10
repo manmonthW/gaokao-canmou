@@ -744,6 +744,46 @@ async def sensitivity(
     }
 
 
+async def refresh_snapshots(
+    *,
+    year: int,
+    category: str,
+    subject: str,
+    batch: str,
+    rank: Optional[int] = None,
+    score: Optional[int] = None,
+    rank_lo: Optional[int] = None,
+    rank_hi: Optional[int] = None,
+    items: list,
+    cfg: Optional[dict] = None,
+):
+    """工作台「刷新到最新数据」：快照在加入时冻结（spec §5.2.6），
+    年度接入后旧方案缺新年（如 2024）的 yearly/位次/分档。
+    按 (院校代码, 专业代码/专业名, 批次) 逐单元用最新全量数据重算，
+    不应用偏好筛选；首选科目硬约束与 match 一致。"""
+    cfg = cfg or MATCH_CONFIG
+    if rank_lo is not None and rank_hi is not None:
+        rank = rank_hi  # 与 match 区间模式主判定一致（悲观上界）
+    rank = await _resolve_rank(year, category, subject, rank, score)
+    if rank is None or rank <= 0:
+        return {"error": "方案缺少有效考生位次，无法刷新；请在「智能匹配」页补全位次后重建方案。"}
+    _, candidates, _, _, _ = await _prepare_candidates(
+        category=category, subject=subject, batch=batch, year=year, rank=rank, cfg=cfg,
+    )
+    by_key = {
+        _build_unit_key(c["school_code"], c["major_code"], c["major_name"], c["batch"]): c
+        for c in candidates
+    }
+    out = []
+    for it in items:
+        c = by_key.get(_build_unit_key(
+            it.get("school_code"), it.get("major_code") or it.get("major_name"),
+            it.get("major_name"), it.get("batch")))
+        if c is not None:
+            out.append(c)
+    return {"data_version": await get_data_version(), "items": out}
+
+
 async def match(
     *,
     year: int,

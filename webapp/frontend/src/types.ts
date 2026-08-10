@@ -629,6 +629,13 @@ export interface SensitivityResponse {
   error?: string
 }
 
+/** 工作台快照刷新响应（「刷新到最新数据」：年度接入后旧方案补新年数据） */
+export interface RefreshSnapshotsResponse {
+  data_version: string | null
+  items: MatchCandidate[]
+  error?: string
+}
+
 /** P1 线差法估位响应（备考期） */
 export interface EstimateRankResponse {
   category: string
