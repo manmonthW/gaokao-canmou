@@ -94,6 +94,9 @@ def main():
             print(f"  [ERROR] {os.path.basename(path)}: {e}")
         n += 1
     print(f"\n处理文件总数: {n}  失败: {errs}")
+    if conn is not None:
+        k = load.sync_publication_status(conn)
+        print(f"发布状态矩阵同步: {k} 行（库内有数据的组合均标记已完成）")
 
 
 if __name__ == "__main__":

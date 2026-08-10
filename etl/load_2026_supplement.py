@@ -33,6 +33,7 @@ import psycopg2
 
 import readers
 import transform
+import load
 from meta import infer_meta, title_blob
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -298,19 +299,8 @@ def main():
         )
         inserted += 1
 
-    # 同步批次发布状态：本次入库的 (year,category,subject,batch,stage) 标记为已完成
-    cur.execute(
-        """INSERT INTO admission_publication_status
-             (year, category, subject, batch, stage, status, system_updated_at)
-           SELECT DISTINCT year, category, subject, batch,
-                  CASE WHEN is_collection THEN '征集' ELSE '常规' END,
-                  '已完成', now()
-           FROM admission_scores
-           WHERE src_id = ANY(%s)
-           ON CONFLICT (year, category, subject, batch, stage)
-           DO UPDATE SET status='已完成', note=NULL, system_updated_at=now()""",
-        (list(seen_src_keys),),
-    )
+    # 同步发布状态矩阵（共用 load.sync_publication_status，防登记遗漏）
+    load.sync_publication_status(conn)
 
     conn.commit()
     cur.close()
