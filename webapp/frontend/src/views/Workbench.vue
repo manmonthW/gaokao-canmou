@@ -4,7 +4,7 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { api } from '@/api/client'
 import { useProfile } from '@/composables/useProfile'
 import { usePlanner, STRATEGY_BASELINES } from '@/composables/usePlanner'
-import type { CandidateSnapshot, PlanStrategy, RiskLabel, VolunteerPlan } from '@/types'
+import type { CandidateSnapshot, PlanEntry, PlanStrategy, RiskLabel, VolunteerPlan } from '@/types'
 import DataStatusBanner from '@/components/DataStatusBanner.vue'
 import StepGuide from '@/components/StepGuide.vue'
 
@@ -30,7 +30,7 @@ const RISK_COLOR: Record<RiskLabel, string> = {
 }
 
 // ---------- 面向普通用户的悬浮说明（覆盖曲线画图逻辑 / 策略基线） ----------
-const CURVE_TIP = '这张图怎么画：① 每个点＝一个志愿，点的高度＝该院校+专业「历史最难年」的投档门槛位次（历年数据里录取最难的一年，取保守口径）；② 虚线＝你的位次：线上方＝最难年门槛也比你好，属冲击区；紧贴线下方＝稳档区（最可能录取）；远低于线＝保底区；③ 点的颜色是最终档位判定（还会综合考虑波动、数据完整度等），高度只是判定依据之一，所以个别「稳」的点略高于线是正常的（最难年够不着、但历史中位够得着）；④ 健康的志愿表曲线应按 冲→稳→保 单调下沉，尾部全是保档。'
+const CURVE_TIP = '这张图怎么画：① 每个点＝一个志愿，点的高度＝该院校+专业「历史最难年」的投档门槛位次（历年数据里录取最难的一年，取保守口径）；② 虚线＝你的位次：线上方＝最难年门槛也比你好，属冲击区；紧贴线下方＝稳档区（最可能录取）；远低于线＝保底区；③ 点的颜色是最终档位判定（还会综合考虑波动、数据完整度等），高度只是判定依据之一，所以个别「稳」的点略高于线是正常的（最难年够不着、但历史中位够得着）；④ 健康的志愿表曲线应按 冲→稳→保 单调下沉，尾部全是保档；⑤ 年份切换只改纵轴口径（看「如果只信这一年，每个志愿站在哪」），不改变分档——分档仍以最难年+安全边际为准。'
 const STRATEGY_TIPS: Record<PlanStrategy, string> = {
   冲击: '冲击型：冲约36% / 稳29% / 保35%。愿意用更多冲刺槽位博更好学校，但保底安全垫不缩水；适合能接受「用滑到更低一档的可能、换更好学校机会」的考生。',
   均衡: '均衡型：冲20% / 稳50% / 保30%。稳档占一半作主体，兼顾「博好学校」和「不滑档」，是最常见的建议比例。',
@@ -97,39 +97,104 @@ function smoothPath(pts: { x: number; y: number }[]): string {
   }
   return d
 }
+// ---------- 分年视图 / 三年叠加：纵轴口径切换（分档不变，仍以最难年为基准） ----------
+type CurveMode = 'hardest' | 'overlay' | number
+const curveYear = ref<CurveMode>('hardest')
+const availableYears = computed(() => {
+  const ys = new Set<number>()
+  for (const e of activePlan.value?.entries ?? []) for (const t of e.yearly ?? []) ys.add(t.year)
+  return [...ys].sort((a, b) => b - a)
+})
+const curveMode = computed<CurveMode>(() => {
+  const m = curveYear.value
+  return typeof m === 'number' && !availableYears.value.includes(m) ? 'hardest' : m
+})
+// 叠加细线调色板（按年份升序：蓝/橙/绿，未来新增年份循环取色）
+const OVERLAY_COLORS = ['#409eff', '#e6a23c', '#67c23a', '#909399', '#f56c6c']
+
+const curveHeadNote = computed(() => {
+  const mode = curveMode.value
+  if (typeof mode === 'number') {
+    const p = activePlan.value
+    const k = p ? p.entries.filter((e) => (e.yearly ?? []).some((t) => t.year === mode && t.lowest_rank != null)).length : 0
+    return `纵轴＝${mode} 年投档门槛位次（对数）；空心点＝该志愿当年无数据（有数据 ${k}/${p?.entries.length ?? 0}）；分档颜色仍为最终判定`
+  }
+  if (mode === 'overlay') return '粗线＝最难年口径（分档基准），细线为各年门槛，看年际跳动'
+  return '纵轴＝最难年门槛位次（对数，分档基准）：冲在虚线上方、稳紧贴线下（最可能录取）、保沉底；整体应单调下沉'
+})
+const curveNote = computed(() => {
+  const p = activePlan.value
+  const mode = curveMode.value
+  if (!p || p.entries.length < 2 || typeof mode !== 'number') return null
+  const k = p.entries.filter((e) => (e.yearly ?? []).some((t) => t.year === mode && t.lowest_rank != null)).length
+  return k < 2 ? `${mode} 年数据不足（${k}/${p.entries.length} 个志愿有该年门槛位次），无法成线，请切换其他年份或最难年。` : null
+})
+
 const curve = computed(() => {
   const p = activePlan.value
   if (!p || p.entries.length < 2) return null
-  const pts = p.entries
-    .map((e, i) => ({ i: i + 1, y: e.best_rank ?? e.last_year_rank ?? e.worst_rank, last: e.last_year_rank, risk: e.risk as RiskLabel, over: !!e.over_safe, far: !!e.over_reach, name: `${e.school_name}·${e.major_name}` }))
-    .filter((d): d is typeof d & { y: number } => d.y != null)
+  const mode = curveMode.value
+  const yearRank = (e: PlanEntry, yr: number) =>
+    (e.yearly ?? []).find((t) => t.year === yr)?.lowest_rank ?? null
+  const all = p.entries.map((e, i) => ({
+    i: i + 1,
+    // 分年模式取该年门槛；最难年/叠加模式维持原保守口径
+    y: typeof mode === 'number' ? yearRank(e, mode) : e.best_rank ?? e.last_year_rank ?? e.worst_rank,
+    last: e.last_year_rank, risk: e.risk as RiskLabel, over: !!e.over_safe, far: !!e.over_reach,
+    name: `${e.school_name}·${e.major_name}`,
+  }))
+  const pts = all.filter((d): d is typeof d & { y: number } => Number.isFinite(d.y))
   if (pts.length < 2) return null
+  const gaps = typeof mode === 'number' ? all.filter((d) => !Number.isFinite(d.y)) : []
   const ex = p.examinee
   const exHi = ex.rank ?? ex.rank_hi ?? null // 精确位次或区间上界（悲观）
   const exLo = ex.rank_mode === 'interval' ? ex.rank_lo ?? null : null // 区间下界（乐观）
   const vals = [...pts.map((d) => d.y)]
   if (exHi != null) vals.push(exHi)
   if (exLo != null) vals.push(exLo)
-  const minV = Math.max(1, Math.min(...vals) * 0.8)
-  const maxV = Math.max(...vals) * 1.25
+  // 叠加模式：各年门槛均纳入纵轴范围，防细线越界
+  if (mode === 'overlay') {
+    for (const e of p.entries) for (const t of e.yearly ?? []) if (t.lowest_rank != null) vals.push(t.lowest_rank)
+  }
+  const finiteVals = vals.filter((v) => Number.isFinite(v))
+  if (finiteVals.length < 1) return null
+  const minV = Math.max(1, Math.min(...finiteVals) * 0.8)
+  const maxV = Math.max(...finiteVals) * 1.25
   const lgMin = Math.log10(minV)
   const lgSpan = Math.max(0.1, Math.log10(maxV) - lgMin)
   const W = 760, H = 320, padL = 70, padR = 16, padT = 18, padB = 34
   const n = p.entries.length
   const x = (i: number) => padL + ((i - 1) / Math.max(1, n - 1)) * (W - padL - padR)
   const y = (v: number) => padT + ((Math.log10(Math.max(1, v)) - lgMin) / lgSpan) * (H - padT - padB)
+  const fy = (v: number | null | undefined) => {
+    if (v == null || !Number.isFinite(v)) return null
+    const yy = y(v)
+    return Number.isFinite(yy) ? +yy.toFixed(1) : null
+  }
   const xy = pts.map((d) => ({ x: x(d.i), y: y(d.y) }))
   const line = smoothPath(xy)
   const bottom = H - padB
   const area = `${line} L${xy[xy.length - 1].x.toFixed(1)},${bottom} L${xy[0].x.toFixed(1)},${bottom} Z`
-  // 对数刻度：1/2/5×10^k 取样，≥1万 显示为「N万」
+  // 叠加细线：每年一条（只连接有值点，缺值跨过）
+  const overlays = mode === 'overlay'
+    ? [...availableYears.value].sort((a, b) => a - b).map((yr, idx) => ({
+        year: yr,
+        color: OVERLAY_COLORS[idx % OVERLAY_COLORS.length],
+        d: smoothPath(p.entries
+          .map((e, i) => ({ i: i + 1, v: yearRank(e, yr) }))
+          .filter((o): o is { i: number; v: number } => Number.isFinite(o.v))
+          .map((o) => ({ x: x(o.i), y: y(o.v) }))),
+      })).filter((o) => o.d)
+    : []
+  // 对数刻度：1/2/5×10^k 取样，≥1万 显示为「N万」（跳过非有限值，防 NaN 属性）
   const ticks: { y: string; label: string }[] = []
   for (let e = Math.floor(Math.log10(minV)); e <= Math.ceil(Math.log10(maxV)); e++) {
     for (const m of [1, 2, 5]) {
       const v = m * 10 ** e
-      if (v >= minV && v <= maxV) {
+      const ty = fy(v)
+      if (v >= minV && v <= maxV && ty != null) {
         ticks.push({
-          y: +y(v).toFixed(1),
+          y: String(ty),
           label: v >= 10000 && v % 10000 === 0 ? `${v / 10000}万` : v.toLocaleString(),
         })
       }
@@ -138,11 +203,13 @@ const curve = computed(() => {
   const ticksShown = ticks.length > 7 ? ticks.filter((_, i) => i % 2 === 0) : ticks
   // 稳档带：你的位次线 → 稳簇底部，即「最可能录取区间」
   let wenBand: { top: number; height: number } | null = null
-  const wenYs = pts.filter((d) => d.risk === '稳').map((d) => y(d.y))
+  const wenYs = pts.filter((d) => d.risk === '稳').map((d) => y(d.y)).filter(Number.isFinite)
   if (wenYs.length) {
-    const anchor = exHi != null ? y(exHi) : Math.min(...wenYs)
-    const top = Math.max(padT, Math.min(anchor, ...wenYs) - 8)
-    wenBand = { top: +top.toFixed(1), height: +Math.max(18, Math.max(...wenYs) - top + 10).toFixed(1) }
+    const anchorY = exHi != null ? y(exHi) : Math.min(...wenYs)
+    if (Number.isFinite(anchorY)) {
+      const top = Math.max(padT, Math.min(anchorY, ...wenYs) - 8)
+      wenBand = { top: +top.toFixed(1), height: +Math.max(18, Math.max(...wenYs) - top + 10).toFixed(1) }
+    }
   }
   // 横轴序号刻度：不多则全显，多则抽样并保证末位
   const step = n <= 16 ? 1 : Math.ceil(n / 12)
@@ -151,9 +218,12 @@ const curve = computed(() => {
   if ((n - 1) % step !== 0) xTicks.push({ x: +x(n).toFixed(1), label: n })
   return {
     W, H, padL, right: W - padR, bottom, line, area, ticks: ticksShown, xTicks, wenBand,
-    circles: pts.map((d) => ({ cx: +x(d.i).toFixed(1), cy: +y(d.y).toFixed(1), risk: d.risk, over: d.over, far: d.far, label: `第 ${d.i} 位 ${d.name}（最难年 ${d.y.toLocaleString()}${d.last != null && d.last !== d.y ? ` / 最近年 ${d.last.toLocaleString()}` : ''}${d.over ? ' · 过深保底：保护已饱和' : d.far ? ' · 超冲：差距过大' : ''}）` })),
-    exY: exHi != null ? +y(exHi).toFixed(1) : null, exHi,
-    exLoY: exLo != null ? +y(exLo).toFixed(1) : null, exLo,
+    circles: pts.map((d) => ({ cx: +x(d.i).toFixed(1), cy: +y(d.y).toFixed(1), risk: d.risk, over: d.over, far: d.far, label: typeof mode === 'number' ? `第 ${d.i} 位 ${d.name}（${mode} 年门槛 ${d.y.toLocaleString()}）` : `第 ${d.i} 位 ${d.name}（最难年 ${d.y.toLocaleString()}${d.last != null && d.last !== d.y ? ` / 最近年 ${d.last.toLocaleString()}` : ''}${d.over ? ' · 过深保底：保护已饱和' : d.far ? ' · 超冲：差距过大' : ''}）` })),
+    gaps: gaps.map((d) => ({ cx: +x(d.i).toFixed(1), label: `第 ${d.i} 位 ${d.name}（${mode} 年无数据）` })),
+    overlays,
+    axisTitle: typeof mode === 'number' ? `${mode} 年门槛位次(对数)` : '最难年门槛位次(对数)',
+    exY: fy(exHi), exHi,
+    exLoY: fy(exLo), exLo,
   }
 })
 
@@ -493,16 +563,22 @@ async function exportPlan(p: VolunteerPlan) {
             </div>
 
             <!-- P2a 整表覆盖曲线：志愿序号 × 历史门槛位次，叠加考生位次（区间）水平线 -->
-            <el-card v-if="curve" class="card curve-card" shadow="never">
+            <el-card v-if="curve || curveNote" class="card curve-card" shadow="never">
               <template #header>
-                <div class="card__head"><span class="curve-title">整表覆盖曲线
-                  <el-tooltip :content="CURVE_TIP" placement="top" popper-class="wb-tip">
-                    <span class="help-q">这图怎么画？</span>
-                  </el-tooltip></span>
-                  <span class="muted">纵轴＝最难年门槛位次（对数，分档基准）：冲在虚线上方、稳紧贴线下（最可能录取）、保沉底；整体应单调下沉</span>
+                <div class="card__head card__head--curve">
+                  <span class="curve-title">整表覆盖曲线
+                    <el-tooltip :content="CURVE_TIP" placement="top" popper-class="wb-tip">
+                      <span class="help-q">这图怎么画？</span>
+                    </el-tooltip></span>
+                  <el-radio-group v-model="curveYear" size="small" class="curve-mode">
+                    <el-radio-button value="hardest">最难年</el-radio-button>
+                    <el-radio-button v-for="yr in availableYears" :key="yr" :value="yr">{{ yr }}</el-radio-button>
+                    <el-radio-button value="overlay">三年叠加</el-radio-button>
+                  </el-radio-group>
+                  <span class="muted">{{ curveHeadNote }}</span>
                 </div>
               </template>
-              <svg :viewBox="`0 0 ${curve.W} ${curve.H}`" class="curve" role="img" aria-label="志愿表覆盖曲线">
+              <svg v-if="curve" :viewBox="`0 0 ${curve.W} ${curve.H}`" class="curve" role="img" aria-label="志愿表覆盖曲线">
                 <defs>
                   <linearGradient id="curveArea" x1="0" y1="0" x2="0" y2="1">
                     <stop offset="0%" stop-color="var(--color-primary)" stop-opacity="0.20" />
@@ -521,7 +597,7 @@ async function exportPlan(p: VolunteerPlan) {
                   <rect :x="curve.padL" :y="curve.wenBand.top" :width="curve.right - curve.padL" :height="curve.wenBand.height" class="curve__wen" />
                   <text :x="curve.right - 6" :y="curve.wenBand.top + curve.wenBand.height - 6" text-anchor="end" class="curve__wen-label">稳档带 · 最可能录取区间</text>
                 </template>
-                <text :x="curve.padL - 8" :y="curve.padT - 6" text-anchor="end" class="curve__tick">最难年门槛位次(对数)</text>
+                <text :x="curve.padL - 8" :y="curve.padT - 6" text-anchor="end" class="curve__tick">{{ curve.axisTitle }}</text>
                 <!-- 横向网格刻度（位次值，越小越难） -->
                 <g v-for="(t, i) in curve.ticks" :key="'g' + i">
                   <line :x1="curve.padL" :x2="curve.right" :y1="t.y" :y2="t.y" class="curve__grid" />
@@ -530,6 +606,14 @@ async function exportPlan(p: VolunteerPlan) {
                 <!-- 渐变面积 + 平滑曲线 -->
                 <path :d="curve.area" fill="url(#curveArea)" />
                 <path :d="curve.line" fill="none" stroke="var(--color-primary)" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" opacity="0.85" />
+                <!-- 三年叠加细线 + 右上角图例 -->
+                <template v-if="curve.overlays.length">
+                  <path v-for="o in curve.overlays" :key="'ov' + o.year" :d="o.d" fill="none" :stroke="o.color" stroke-width="1.5" stroke-dasharray="5 4" opacity="0.85" />
+                  <g v-for="(o, i) in curve.overlays" :key="'ovl' + o.year">
+                    <line :x1="curve.right - 158 + i * 54" :x2="curve.right - 144 + i * 54" :y1="curve.padT + 8" :y2="curve.padT + 8" :stroke="o.color" stroke-width="2" />
+                    <text :x="curve.right - 140 + i * 54" :y="curve.padT + 11" class="curve__tick">{{ o.year }}</text>
+                  </g>
+                </template>
                 <!-- 考生位次水平线（区间模式画两条） -->
                 <template v-if="curve.exY != null">
                   <line :x1="curve.padL" :x2="curve.right" :y1="curve.exY" :y2="curve.exY" class="curve__me" />
@@ -549,12 +633,22 @@ async function exportPlan(p: VolunteerPlan) {
                 >
                   <title>{{ c.label }}</title>
                 </circle>
+                <!-- 分年视图：当年无数据的志愿在底部画空心点 -->
+                <circle
+                  v-for="(g, i) in curve.gaps"
+                  :key="'gap' + i"
+                  :cx="g.cx" :cy="curve.bottom - 6" r="3.5"
+                  class="curve__gap"
+                >
+                  <title>{{ g.label }}</title>
+                </circle>
                 <!-- 横轴：序号刻度 -->
                 <line :x1="curve.padL" :x2="curve.right" :y1="curve.bottom" :y2="curve.bottom" class="curve__axis" />
                 <text v-for="t in curve.xTicks" :key="'x' + t.label" :x="t.x" :y="curve.bottom + 15" text-anchor="middle" class="curve__tick">{{ t.label }}</text>
                 <text :x="(curve.W + curve.padL) / 2" :y="curve.H - 4" text-anchor="middle" class="curve__tick">志愿序号 →</text>
               </svg>
-              <div class="curve-legend">
+              <div v-if="!curve && curveNote" class="curve-note">{{ curveNote }}</div>
+              <div v-if="curve" class="curve-legend">
                 <span v-for="r in (['冲', '稳', '保', '高波动', '数据不足'] as RiskLabel[])" :key="r" class="curve-legend__item">
                   <i class="curve-legend__dot" :style="{ background: RISK_COLOR[r] }"></i>{{ r }}
                 </span>
@@ -562,6 +656,8 @@ async function exportPlan(p: VolunteerPlan) {
                 <span v-if="curve.wenBand" class="curve-legend__item"><i class="curve-legend__zone curve-legend__zone--wen"></i>稳档带（最可能录取）</span>
                 <span v-if="curve.exY != null" class="curve-legend__item"><i class="curve-legend__zone curve-legend__zone--reach"></i>冲击区</span>
                 <span v-if="curve.exY != null" class="curve-legend__item"><i class="curve-legend__zone curve-legend__zone--safe"></i>保底区</span>
+                <span v-for="o in curve.overlays" :key="'lg' + o.year" class="curve-legend__item"><i class="curve-legend__line" :style="{ color: o.color }"></i>{{ o.year }} 门槛</span>
+                <span v-if="curve.gaps.length" class="curve-legend__item"><i class="curve-legend__gapdot"></i>当年无数据</span>
                 <span class="curve-legend__hint">悬停圆点查看明细</span>
               </div>
             </el-card>
@@ -754,6 +850,13 @@ async function exportPlan(p: VolunteerPlan) {
 .curve__wen-label { font-size: 10px; font-weight: 700; fill: var(--color-primary); paint-order: stroke; stroke: #fff; stroke-width: 3px; }
 .curve-legend__zone--wen { background: var(--el-color-primary-light-9); }
 .curve-legend__hint { margin-left: auto; color: var(--color-text-muted); }
+/* 分年视图 / 三年叠加 */
+.card__head--curve { flex-wrap: wrap; }
+.curve-mode { flex: none; }
+.curve__gap { fill: #fff; stroke: var(--color-text-muted, #999); stroke-width: 1.5; stroke-dasharray: 2 2; }
+.curve-note { color: var(--color-text-muted); font-size: var(--text-xs); padding: var(--space-2) 0; }
+.curve-legend__line { width: 18px; border-top: 2px dashed currentColor; }
+.curve-legend__gapdot { width: 8px; height: 8px; border-radius: 50%; border: 1.5px dashed var(--color-text-muted, #999); background: #fff; box-sizing: border-box; }
 </style>
 
 <style>
