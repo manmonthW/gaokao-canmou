@@ -126,12 +126,16 @@ async function refreshPlanData() {
   refreshing.value = true
   try {
     const ex = p.examinee
+    // 旧档案可能存了空字符串（v-model.number 清空后的残留），统一过滤为正整数才发送
+    const posInt = (v: unknown) =>
+      typeof v === 'number' && Number.isFinite(v) && v > 0 ? Math.round(v) : undefined
+    const rLo = posInt(ex.rank_lo), rHi = posInt(ex.rank_hi)
     const resp = await api.matchRefresh({
       year: ex.year, category: ex.category, subject: ex.subject, batch: ex.batch,
-      ...(ex.rank_mode === 'interval' && ex.rank_lo && ex.rank_hi
-        ? { rank_lo: ex.rank_lo, rank_hi: ex.rank_hi }
-        : { rank: ex.rank ?? undefined }),
-      score: ex.score ?? undefined,
+      ...(ex.rank_mode === 'interval' && rLo && rHi
+        ? { rank_lo: rLo, rank_hi: rHi }
+        : { rank: posInt(ex.rank) }),
+      score: posInt(ex.score),
       items: p.entries.map((e) => ({
         school_code: e.school_code, major_code: e.major_code,
         major_name: e.major_name, batch: e.batch,

@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Query
 from typing import List, Optional
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 from app.services import match as svc
 
 router = APIRouter(prefix="/match", tags=["match"])
@@ -23,6 +23,12 @@ class RefreshRequest(BaseModel):
     rank_lo: Optional[int] = None
     rank_hi: Optional[int] = None
     items: List[RefreshItem]
+
+    # 旧档案可能存空字符串（v-model.number 清空残留），容忍为 None
+    @field_validator("rank", "score", "rank_lo", "rank_hi", mode="before")
+    @classmethod
+    def _empty_to_none(cls, v):
+        return None if v == "" else v
 
 
 @router.get("")

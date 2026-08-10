@@ -229,3 +229,10 @@ yearly 并集动态生成，新一年接入免改代码。切换只改纵轴口�
 浏览器自动化冒烟：旧方案（2026.1、yearly 仅 25/26）→ 提示条出现且无 2024
 选项 → 刷新 → toast「已刷新 6 个志愿到数据版本 2026.3」→ 2024 选项出现、
 提示条消失；五种视图 SVG 属性 NaN 全 0、控制台错误 0。
+
+### 补丁：刷新按钮 422（score 空字符串）
+
+用户实点刷新报 422 int_parsing（body.score=""）：旧档案 v-model.number
+清空残留空串，?? undefined 不过滤。前端 refreshPlanData 改用 posInt()
+统一过滤 rank/score/rank_lo/rank_hi 为正整数才发送；后端 RefreshRequest
+增 field_validator(mode='before') 空串→None 双保险。回归冒烟通过。
