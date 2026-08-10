@@ -123,6 +123,7 @@ def parse_sheet(rows):
         str(c) for c in rows[hdr]) else "投档最低分"
 
     records = []
+    last_code = None
     for r in rows[start:]:
         sc = _cell(r, cols.get("school_code"))
         sn = _cell(r, cols.get("school_name"))
@@ -132,6 +133,13 @@ def parse_sheet(rows):
         # 跳过说明行
         if sn is not None and ("注：" in str(sn) or "说明" in str(sn)):
             continue
+        # 合并格前向填充：院校编号格为空但行有数据（如辽东学院定向就业行，
+        # 编号沿用上方最近非空行），继承上方校码，避免 NULL 校码入库。
+        if (sc is None or str(sc).strip() == "") and last_code is not None and \
+           not any(k in str(sn) for k in ("合计", "总计")):
+            sc = last_code
+        if sc is not None and str(sc).strip():
+            last_code = str(sc).strip()
         mc = _cell(r, cols.get("major_code"))
         mn = _cell(r, cols.get("major_name"))
         raw = _cell(r, lowest)

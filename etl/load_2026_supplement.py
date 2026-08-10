@@ -1,40 +1,39 @@
 """
 2026 补充入库脚本
 =================
-处理用户下载的 8 个 2026 录取分数文件：
+处理迟到/需人工裁决的 2026 录取分数文件（用户下载）：
 
-[xlsx] 普通类·专科提前批 录取最低分（历史/物理）
-    - lns2026gklqzktqzj080202W.xlsx  (历史)
-    - lns2026gklqzktqzj080202L.xlsx  (物理)
-    列：院校编号 / 招生院校 / 录取最低分
-    入库：batch=专科提前批, category=普通类, is_collection=False, score_kind=录取最低分
+[xlsx] 普通类·专科提前批（历史/物理）
+    - lns2026gklqzktqzj080202W/L.xlsx  录取最低分（正常录取，非征集）
+    - lns2026gklqzktqzj0805W/L.xlsx   “征集志愿”录取最低分
+[xlsx] 普通类·本科批 第二次“征集志愿”投档最低分
+    - lns2026bkzdfzj20729w/l.xlsx
+[xlsx] 普通类·专科批（历史/物理）
+    - lns2026gklqzkzdf0806w/l.xlsx    投档最低分（正常投档）
+    - lns2026gklqzkjz0809w/l.xlsx     第一次“征集志愿”投档最低分
+    列：院校编号/招生院校/(专业编号/招生专业/)投档(录取)最低分/(一)~(七)排序项；
+    院校编号合并格空行沿用上行校码前向填充（transform.parse_sheet 统一处理）。
 
-[xlsx] 普通类·本科批 第二次“征集志愿” 投档最低分（历史/物理）
-    - lns2026bkzdfzj20729w.xlsx  (历史)
-    - lns2026bkzdfzj20729l.xlsx  (物理)
-    列：院校编号/招生院校/专业编号/招生专业/投档最低分/(一)~(七)排序项
-    入库：batch=本科批, category=普通类, is_collection=True, score_kind=投档最低分
+[pdf] 艺术/体育类·专科批 征集（历史/物理）投档最低分
+    - lns2026gklq0729d3/d7/i4/i8zdf.pdf
+    使用人工逐行核对的精确数据（pdf_2026_supplement_verified.PDF_VERIFIED）。
 
-[pdf] 艺术类·专科批 征集（历史/物理）投档最低分
-    - lns2026gklq0729d3zdf.pdf  (历史)
-    - lns2026gklq0729d7zdf.pdf  (物理)
-[pdf] 体育类·专科批 征集（历史/物理）投档最低分
-    - lns2026gklq0729i4zdf.pdf  (历史)
-    - lns2026gklq0729i8zdf.pdf  (物理)
-    PDF 文字表（带竖排水印，需过滤），列与征集 xlsx 类似。
+xlsx 解析复用 readers+transform（与 verify_all 对账同一口径），
+meta 用下方映射表裁决，并与标题推断交叉校验防误判。
 
 运行：
     python3 etl/load_2026_supplement.py --dry-run      # 只解析不入库，打印核对
     python3 etl/load_2026_supplement.py                # 正式入库
 """
 import os
-import re
 import sys
 import json
 import argparse
 import psycopg2
-import openpyxl
-import pdfplumber
+
+import readers
+import transform
+from meta import infer_meta, title_blob
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 # 写库连接串：从环境变量读取，禁止硬编码口令。
@@ -48,10 +47,7 @@ if not WRITER_DSN:
         '  export GAOKAO_WRITER_DSN="postgresql://gaokao_writer:<password>@localhost:5432/gaokao"'
     )
 
-# 竖排水印字符（辽宁省招生考试委员会办公室高等教育）——需从 PDF 文字中滤除
-WM_CHARS = set("辽宁省招生考试委员会办公室高等教育")
-
-# 文件 → 目标映射
+# 文件 → 目标映射（meta 以标题原文裁决；build_records 内与 infer_meta 交叉校验）
 XLSX_MAP = [
     {
         "file": "2026/lns2026gklqzktqzj080202W.xlsx",
@@ -71,6 +67,36 @@ XLSX_MAP = [
     {
         "file": "2026/lns2026bkzdfzj20729l.xlsx",
         "category": "普通类", "batch": "本科批",
+        "is_collection": True, "subject": "物理学科类", "score_kind": "投档最低分",
+    },
+    {
+        "file": "2026/lns2026gklqzktqzj0805W.xlsx",
+        "category": "普通类", "batch": "专科提前批",
+        "is_collection": True, "subject": "历史学科类", "score_kind": "录取最低分",
+    },
+    {
+        "file": "2026/lns2026gklqzktqzj0805L.xlsx",
+        "category": "普通类", "batch": "专科提前批",
+        "is_collection": True, "subject": "物理学科类", "score_kind": "录取最低分",
+    },
+    {
+        "file": "2026/lns2026gklqzkzdf0806w.xlsx",
+        "category": "普通类", "batch": "专科批",
+        "is_collection": False, "subject": "历史学科类", "score_kind": "投档最低分",
+    },
+    {
+        "file": "2026/lns2026gklqzkzdf0806l.xlsx",
+        "category": "普通类", "batch": "专科批",
+        "is_collection": False, "subject": "物理学科类", "score_kind": "投档最低分",
+    },
+    {
+        "file": "2026/lns2026gklqzkjz0809w.xlsx",
+        "category": "普通类", "batch": "专科批",
+        "is_collection": True, "subject": "历史学科类", "score_kind": "投档最低分",
+    },
+    {
+        "file": "2026/lns2026gklqzkjz0809l.xlsx",
+        "category": "普通类", "batch": "专科批",
         "is_collection": True, "subject": "物理学科类", "score_kind": "投档最低分",
     },
 ]
@@ -99,146 +125,6 @@ PDF_MAP = [
 ]
 
 
-def clean_num(s):
-    """把混合了水印字符的数字串还原成数字。返回 (value, suspicious)。"""
-    if s is None:
-        return None, False
-    s = str(s).strip()
-    if s == "":
-        return None, False
-    # 去除水印字符
-    cleaned = "".join(ch for ch in s if ch not in WM_CHARS)
-    cleaned = cleaned.replace(" ", "")
-    # 合法数字（整数或小数）
-    if re.fullmatch(r"\d+(\.\d+)?", cleaned):
-        return cleaned, False
-    # 含可疑字符
-    return cleaned, True
-
-
-def parse_xlsx(path):
-    """返回 list[dict]，含字段 school_code, school_name, major_code, major_name,
-    lowest_score, tiebreak_1..7, raw_row(list)。"""
-    wb = openpyxl.load_workbook(os.path.join(ROOT, path), read_only=True, data_only=True)
-    ws = wb.active
-    rows = list(ws.iter_rows(values_only=True))
-    wb.close()
-    # 找表头行：含 '院校编号' 或 '院校\n编号'
-    header_idx = None
-    for i, r in enumerate(rows):
-        cells = [str(c).replace("\n", "") for c in r if c is not None]
-        if any("院校编号" in c for c in cells):
-            header_idx = i
-            break
-    if header_idx is None:
-        raise RuntimeError(f"{path}: 未找到表头行")
-    # 表头可能跨两行（(一)~(七) 在下一行）
-    header = [str(c).replace("\n", "").strip() if c is not None else "" for c in rows[header_idx]]
-    # 合并下一行
-    if header_idx + 1 < len(rows):
-        nxt = rows[header_idx + 1]
-        for j, c in enumerate(nxt):
-            if c is not None and str(c).strip():
-                header[j] = (header[j] + " " + str(c).strip()).strip()
-    # 列索引
-    def idx(sub):
-        for j, h in enumerate(header):
-            if sub in h:
-                return j
-        return None
-    i_code = idx("院校编号")
-    i_school = idx("招生院校")
-    i_mcode = idx("专业编号")
-    i_major = idx("招生专业")
-    i_score = idx("投档最低分") or idx("录取最低分")
-    tb = [idx(f"（{k}）") for k in range(1, 8)]
-    # 兼容无括号写法
-    if None in tb:
-        tb = [idx(f"({k})") for k in range(1, 8)]
-
-    out = []
-    for r in rows[header_idx + 1:]:
-        # 跳过全空行
-        if all(c is None or str(c).strip() == "" for c in r):
-            continue
-        # 院校编号必须为数字串，否则可能是注脚
-        code = r[i_code] if i_code is not None else None
-        if code is None or str(code).strip() == "":
-            continue
-        rec = {
-            "school_code": str(code).strip(),
-            "school_name": str(r[i_school]).strip() if r[i_school] is not None else "",
-            "major_code": str(r[i_mcode]).strip() if (i_mcode is not None and r[i_mcode] is not None) else None,
-            "major_name": str(r[i_major]).strip() if (i_major is not None and r[i_major] is not None) else None,
-            "lowest_score": r[i_score],
-            "tiebreaks": [r[t] if t is not None else None for t in tb],
-            "raw_row": [str(c) for c in r],
-        }
-        out.append(rec)
-    return out
-
-
-def parse_pdf(path):
-    """按坐标分栏解析 PDF 文字表，过滤竖排水印。
-    列 x 锚定（基于 d3 样例）：
-        院校编号 ~55, 院校名称 ~77, 专业代号 ~163, 专业名称 ~185,
-        专业备注 ~261(可选), 投档成绩 ~535,
-        (一)~(八)排序项 565/594/623/644/673/706/744/776
-    """
-    rows_out = []
-    with pdfplumber.open(os.path.join(ROOT, path)) as pdf:
-        for page in pdf.pages:
-            words = page.extract_words()
-            # 过滤水印：字符属于 WM_CHARS 且位于竖排带（top<100 或 x 在 460-620 且构成竖列）
-            data_words = []
-            for w in words:
-                t = w["text"]
-                x0 = w["x0"]
-                top = w["top"]
-                # 水印竖列：top 为负或 x 在 460~620 之间且文字为 WM 字符
-                if t in WM_CHARS and (top < 100 or 460 <= x0 <= 620):
-                    continue
-                data_words.append(w)
-            # 按 top 排序，找到所有“院校编号”数据行锚点
-            data_words.sort(key=lambda w: (w["top"], w["x0"]))
-            # 找数据行：包含“院校编号”列（x≈55，纯数字4位）的行
-            code_words = [w for w in data_words
-                          if 45 <= w["x0"] <= 75 and re.fullmatch(r"\d{4}", w["text"])]
-            for code_w in code_words:
-                # 以 code 的 top 为中心，收集 ±10px 垂直窗口内的所有词（处理校名/专业名轻微错位）
-                ctop = code_w["top"]
-                band = [w for w in data_words if abs(w["top"] - ctop) <= 10]
-                band.sort(key=lambda w: w["x0"])
-
-                def nearest(x_center, tol=24, pool=band):
-                    best = None
-                    for w in pool:
-                        if abs((w["x0"] + w["x1"]) / 2 - x_center) < tol:
-                            if best is None or abs((w["x0"] + w["x1"]) / 2 - x_center) < abs((best["x0"] + best["x1"]) / 2 - x_center):
-                                best = w
-                    return best
-                # 院校名称：院校编号右侧、专业代号左侧
-                school_w = nearest(115)
-                mcode_w = nearest(163)
-                major_w = nearest(200)
-                # 投档成绩
-                score_w = nearest(535)
-                tb_centers = [565, 594, 623, 644, 673, 706, 744, 776]
-                tbs = [nearest(c) for c in tb_centers]
-
-                rec = {
-                    "school_code": code_w["text"],
-                    "school_name": school_w["text"] if school_w else "",
-                    "major_code": mcode_w["text"] if mcode_w else None,
-                    "major_name": major_w["text"] if major_w else None,
-                    "lowest_score": score_w["text"] if score_w else None,
-                    "tiebreaks": [t["text"] if t else None for t in tbs],
-                    "raw_row": [w["text"] for w in band],
-                }
-                rows_out.append(rec)
-    return rows_out
-
-
 def build_records():
     """汇总所有文件解析结果。返回 (records, issues)。
     xlsx 自动解析；PDF（艺术/体育专科批征集）使用人工逐行核对的精确数据。"""
@@ -249,22 +135,28 @@ def build_records():
     for m in XLSX_MAP:
         path = m["file"]
         try:
-            parsed = parse_xlsx(path)
+            sheets = readers.read_spreadsheet(os.path.join(ROOT, path))
         except Exception as e:
             issues.append(f"解析失败 {path}: {e}")
             continue
-        for p in parsed:
-            score_val, susp = clean_num(p["lowest_score"])
-            tbs = []
-            for t in p["tiebreaks"]:
-                v, s = clean_num(t)
-                tbs.append(v)
-                if s:
-                    susp = True
-            rec = _make_rec(m, p, score_val, tbs, p["raw_row"], path)
-            if susp:
-                issues.append(f"可疑分数 {path} 院校{p['school_code']}: {p['lowest_score']}")
-            records.append(rec)
+        for sheet, rows in sheets:
+            # 交叉校验：标题推断 vs 裁决映射，防 meta 误判
+            im = infer_meta(title_blob(rows, sheet), os.path.basename(path))
+            for k in ("batch", "is_collection", "subject"):
+                if im.get(k) != m[k]:
+                    issues.append(f"meta 不一致 {path}[{sheet}] {k}: 推断={im.get(k)} 映射={m[k]}")
+            recs, ok = transform.parse_sheet(rows)
+            if not ok:
+                issues.append(f"未找到表头 {path}[{sheet}]")
+                continue
+            if recs and recs[0]["score_kind"] != m["score_kind"]:
+                issues.append(f"meta 不一致 {path}[{sheet}] score_kind: "
+                              f"推断={recs[0]['score_kind']} 映射={m['score_kind']}")
+            for p in recs:
+                if p["lowest_score"] is None:
+                    issues.append(f"可疑分数 {path} 院校{p['school_code']}: "
+                                  f"{p['raw_row'].get('lowest')}")
+                records.append(_make_rec(m, p, path))
 
     # PDF：使用人工核对数据（按文件名映射）
     for fname, rows in PV.PDF_VERIFIED.items():
@@ -297,7 +189,7 @@ def build_records():
     return records, issues
 
 
-def _make_rec(m, p, score_val, tbs, raw_row, path):
+def _make_rec(m, p, path):
     return {
         "year": 2026,
         "category": m["category"],
@@ -309,18 +201,17 @@ def _make_rec(m, p, score_val, tbs, raw_row, path):
         "school_name": p["school_name"],
         "major_code": p["major_code"],
         "major_name": p["major_name"],
-        "lowest_score": score_val,
-        "tiebreak_1": tbs[0] if len(tbs) > 0 else None,
-        "tiebreak_2": tbs[1] if len(tbs) > 1 else None,
-        "tiebreak_3": tbs[2] if len(tbs) > 2 else None,
-        "tiebreak_4": tbs[3] if len(tbs) > 3 else None,
-        "tiebreak_5": tbs[4] if len(tbs) > 4 else None,
-        "tiebreak_6": tbs[5] if len(tbs) > 5 else None,
-        "tiebreak_7": tbs[6] if len(tbs) > 6 else None,
-        "raw_row": json.dumps(raw_row, ensure_ascii=False),
+        "lowest_score": p["lowest_score"],
+        "tiebreak_1": p["tb1"],
+        "tiebreak_2": p["tb2"],
+        "tiebreak_3": p["tb3"],
+        "tiebreak_4": p["tb4"],
+        "tiebreak_5": p["tb5"],
+        "tiebreak_6": p["tb6"],
+        "tiebreak_7": p["tb7"],
+        "raw_row": json.dumps(p["raw_row"], ensure_ascii=False),
         "_src_file": path,
     }
-    return records, issues
 
 
 def main():
@@ -354,6 +245,17 @@ def main():
     conn = psycopg2.connect(WRITER_DSN)
     cur = conn.cursor()
     inserted = 0
+    # 院校维度：新校码先入 schools（admission_scores.school_code 外键约束）
+    schools = {(r["school_code"], r["school_name"])
+               for r in records
+               if r.get("school_code") and r.get("school_name")}
+    if schools:
+        from psycopg2 import extras
+        extras.execute_values(
+            cur,
+            "INSERT INTO schools (code,name) VALUES %s "
+            "ON CONFLICT (code) DO NOTHING",
+            list(schools))
     # 幂等重载：先删除本次涉及的 (filename 语义) 对应的旧 admission_scores，
     # 再重新插入，避免重复运行导致 admission_scores 累积。
     # 以 source_files 语义键定位旧 src_id。
@@ -406,7 +308,7 @@ def main():
            FROM admission_scores
            WHERE src_id = ANY(%s)
            ON CONFLICT (year, category, subject, batch, stage)
-           DO UPDATE SET status='已完成', system_updated_at=now()""",
+           DO UPDATE SET status='已完成', note=NULL, system_updated_at=now()""",
         (list(seen_src_keys),),
     )
 

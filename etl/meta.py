@@ -57,7 +57,10 @@ def infer_meta(text, filename):
         elif "tq" in bn:
             batch = "提前批"
 
-    is_coll = ("征集" in t) or ("zj" in lower)
+    # 是否征集只信标题/正文「征集」二字，不用文件名 zj 推断：
+    # 文件名里的 zj 歧义（如 lns2026gklqzktqzj… 的 tqzj=提前批志愿，
+    # 并非征集），曾把 080202 专科提前批正常录取误判为征集。
+    is_coll = ("征集" in t)
     return dict(year=year, category=cat, subject=subj,
                 batch=batch, is_collection=is_coll)
 

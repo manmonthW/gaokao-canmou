@@ -27,8 +27,11 @@ def _f(x):
 
 
 def key_of(r):
+    # 含 school_name：定向就业等合并格行共享校码且无专业列，
+    # 不含校名会被折叠成同一键导致误报。
     return (r.get("school_code"), r.get("major_code"),
-            r.get("major_name"), r.get("subject"), r.get("score_kind"))
+            r.get("major_name"), r.get("school_name"),
+            r.get("subject"), r.get("score_kind"))
 
 
 def parse_pdf_md(path):
@@ -73,7 +76,7 @@ def load_db(conn, filename):
                       score_kind, lowest_score, tiebreak_1, tiebreak_2, tiebreak_3,
                       tiebreak_4, tiebreak_5, tiebreak_6, tiebreak_7,
                       year, category, batch, is_collection
-               FROM admission_scores WHERE src_id=%s""", (sid,))
+               FROM admission_scores WHERE src_id=%s ORDER BY id""", (sid,))
         db = []
         for r in cur.fetchall():
             db.append({
