@@ -175,10 +175,15 @@ dry-run 0 可疑；verify_all 合计 64626/64626 一致，缺/多/值不一致 0
 - CLASSIFICATION_NOTE 刷新为 6 组口径；pytest 47/47；冒烟全绿；
 - admission_publication_status 陈旧 note（「尚未发布/0行」）清理，
   2026 专科批常规/征集均显示已完成；
-- backfill_lowest_rank 重跑：新增 6292 行位次全到位（锉点 606→11742）。
+- backfill_lowest_rank 重跑：新增 6292 行位次全到位（锚点 606→11742）。
 
-### 待用户确认
+### 用户确认结果（Gate ③ 通过）
 
-- 残差 3 的 4 份 2025 历史侧征集公告（体育本/专科、艺术本/专科）若可补交，
-  入库后展示层即可补齐；不补交则维持现状（不影响匹配/回测）；
-- 本次增量发布拟登记 data_releases **2026.3**（Gate ③，待确认）。
+- 残差 3 的 4 份 2025 历史侧征集公告（体育本/专科、艺术本/专科）：用户选择
+  **稍后补交**；文件到位后按既有流程解析入库即可补齐展示层；
+- `data_releases` 已登记 **2026.3**（published，publisher=etl，
+  covered_years={2024,2025,2026}，类别/批次覆盖同 2026.2）；
+  冒烟确认 `/data-status` release=2026.3、`/match` data_version=2026.3。
+
+本轮收尾：margin 维持 0.85；admission_scores 共 66959 行（verify_all 逐文件
+64626/64626 一致）；残差 1/2/4 销账，残差 3 待用户补交文件；2026.3 已发布。
