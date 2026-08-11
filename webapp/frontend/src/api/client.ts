@@ -136,6 +136,7 @@ export const api = {
   // 报考说明（官方招考文件在线阅读）
   guides: () => getJson<GuidesResponse>('/guides'),
   guidePdfUrl: (id: string) => `${ORIGIN}${PREFIX}/guides/${encodeURIComponent(id)}/pdf`,
+  guideHtmlUrl: (id: string) => `${ORIGIN}${PREFIX}/guides/${encodeURIComponent(id)}/html`,
   match: (p: Record<string, unknown>) =>
     getJson<MatchResponse>(`/match${buildQuery(p)}`),
   matchSensitivity: (p: Record<string, unknown>) =>
