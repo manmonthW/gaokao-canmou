@@ -4,7 +4,7 @@
 
 ## 现状核查（部署前必读）
 
-- **PostgreSQL 16 本地集群**：当前默认 `down`，需手动启动。数据目录 `/var/lib/postgresql/16/main`，库名 `gaokao`，10 张表已建好（admission_scores / schools / score_rank / batch_control_line / school_profiles / cities / source_files / raw_texts / data_releases / admission_publication_status），只读账号 `gaokao_web_ro` 可连。
+- **PostgreSQL 16 本地集群**：当前默认 `down`，需手动启动。数据目录 `/var/lib/postgresql/16/main`，库名 `gaokao`，18 张表已建好（admission_scores / schools / score_rank / batch_control_line / school_profiles / cities / source_files / raw_texts / data_releases / admission_publication_status / major_profiles / major_catalog / major_hot_profiles / flag_dictionary / subject_requirements / school_disciplines / major_strengths / strength_dictionary，以 migration 0000–0014 为准），只读账号 `gaokao_web_ro` 可连。
 - **后端**：`backend/run.sh` + `backend/.env` 已配好（`.env` 中 `GAOKAO_DSN` 指向只读角色，**禁止用写库 gaokao 拥有者口令**）。
 - **前端**：`frontend/dist` 已构建，API 基址**写死为 `http://127.0.0.1:8000`**（来源 `frontend/.env` 的 `VITE_API_BASE` 与 `vite.config.ts` 的 proxy）。
 - **端口冲突**：`8000` 目前被另一个项目 `/home/ekewang/eea/.venv/bin/uvicorn` 占用，gaokao 后端若直接起会失败。本机**无 nginx**。
@@ -19,6 +19,21 @@ pg_isready          # 期望输出 "accepting connections"
 ```
 
 > 仅本次会话有效；如需开机自启：`sudo systemctl enable postgresql`（系统有 systemd 时）。
+
+### 1.5 执行数据库迁移（**先迁移，后部署**）
+
+后端依赖 migration 0011–0014 的表/列（flag_dictionary、subject_requirements、
+postgrad_recommend_rate 列、school_disciplines / major_strengths /
+strength_dictionary、school_profiles.strength_tags）。**旧库直接起后端会导致
+/match、/meta、院校详情等接口 500**，部署前必须先把迁移跑齐：
+
+```bash
+cd /home/ekewang/projects/gaokao/ln
+bash webapp/scripts/run_migrations.sh   # 0011–0014，全部幂等可重跑
+```
+
+脚本末尾会回读 flag_dictionary / subject_requirements 行数、0014 三张实力表
+与 strength_tags 列是否存在，核对输出无缺项再进入下一步。
 
 ### 2. 启动后端（已采用虚拟环境，规避 PEP 668）
 

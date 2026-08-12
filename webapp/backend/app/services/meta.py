@@ -1,4 +1,6 @@
 """元数据服务：下拉枚举（年份/科类/选科/批次/层次/性质/类型/省份）。"""
+import psycopg2
+
 from app import db
 
 
@@ -39,10 +41,16 @@ async def get_meta():
     major_flag_rows = await db.fetch_all(
         "SELECT flag, label, severity, note FROM flag_dictionary ORDER BY flag")
     # 院校/专业实力标签词表（任务 #8，migration 0014）：
-    # strength_tags 展示文案与第三方免责口径的唯一权威来源
-    strength_tag_rows = await db.fetch_all(
-        """SELECT tag, label, kind, third_party, source_note, display_order
-           FROM strength_dictionary ORDER BY display_order, tag""")
+    # strength_tags 展示文案与第三方免责口径的唯一权威来源。
+    # 旧库（未跑 0014）降级为空词表：新功能隐身、既有 meta 字段不回归。
+    try:
+        strength_tag_rows = await db.fetch_all(
+            """SELECT tag, label, kind, third_party, source_note, display_order
+               FROM strength_dictionary ORDER BY display_order, tag""")
+    except psycopg2.Error as e:
+        if not db.schema_missing(e):
+            raise
+        strength_tag_rows = []
 
     # 组装科类→批次映射
     batches_by_category: dict[str, list[str]] = {}

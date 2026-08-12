@@ -29,7 +29,32 @@ from collections import defaultdict
 from statistics import median
 from typing import Optional
 
+import psycopg2
+
 from app import db
+
+# --------------------------- 0014 实力数据可用性探测（旧库降级，任务 #8 复验 C1） ---------------------------
+# 主查询直接 SELECT p.strength_tags / 关联 major_strengths 表，旧库（未跑
+# migration 0014）会因列/表缺失让整个 /match 500。这里先探测一次并缓存：
+# 模式不全时 strength_tags=[] / major_strength=[]，新功能隐身、既有匹配不回归。
+_strength_schema = None
+
+
+async def _strength_available() -> tuple:
+    """返回 (strength_tags 列存在, major_strengths 表存在)；探测失败视为不可用。"""
+    global _strength_schema
+    if _strength_schema is None:
+        try:
+            col = await db.fetch_one(
+                "SELECT count(*) FROM information_schema.columns "
+                "WHERE table_name='school_profiles' AND column_name='strength_tags'")
+            tab = await db.fetch_one(
+                "SELECT count(*) FROM information_schema.tables "
+                "WHERE table_schema='public' AND table_name='major_strengths'")
+            _strength_schema = (bool(col and col[0]), bool(tab and tab[0]))
+        except psycopg2.Error:
+            _strength_schema = (False, False)
+    return _strength_schema
 
 # --------------------------- 可调阈值（margin 已经 2025→2026 回测固化，其余阈值附回测依据） ---------------------------
 MATCH_CONFIG = {
@@ -427,9 +452,6 @@ def _build_candidate(unit: dict, R: int, cfg: dict):
         "school_tier": (0 if unit.get("is_985") else 1 if unit.get("is_211")
                         else 2 if unit.get("is_dfc") else 3),
         "city_tier": unit.get("city_tier"),
-        # 院校牌子标签（前端院校名后展示；均否时不渲染）
-        "is_985": unit.get("is_985"),
-        "is_211": unit.get("is_211"),
         "flags": unit["flags"],
         "n_years": unit["n_years"],
         "has_both_years": unit["has_both_years"],
@@ -454,7 +476,11 @@ def _build_candidate(unit: dict, R: int, cfg: dict):
         "rank_diff_last": rank_diff_last,
         "warning": warning,
         "yearly": [{"year": y, "lowest_rank": r} for y, r in unit["yearly"]],
-        # 院校/专业实力附加信息（任务 #8，附加式置于末尾）：空表/无收录时为空数组
+        # 任务 #8 新增附加键（院校牌子标签 + 实力信息）：一律置于字典末尾，
+        # 且后续由调用方统一 pop/re-insert（见 _prepare_candidates 末尾），
+        # 保证既有键（含选科校验后追加的 subject_* 键）字节顺序不变。
+        "is_985": unit.get("is_985"),
+        "is_211": unit.get("is_211"),
         "strength_tags": unit.get("strength_tags", []),
         "major_strength": unit.get("major_strength", []),
     }
@@ -484,11 +510,15 @@ async def _prepare_candidates(
     # ---------- 第二步：资格/数据过滤 ----------
     # 包含 lowest_rank 为空行（库内约 570 行）：这些归入「数据不足」档，
     # 按 roadmap 要求降级为「分数参考」并显式标注，而非直接丢弃。
+    # strength_tags 列仅在新库（0014 已迁移）存在：旧库探测后改取 NULL，
+    # 保证主查询不因列缺失 500（C1 旧库降级）。
+    tags_ok, _ms_ok = await _strength_available()
+    strength_col = "p.strength_tags" if tags_ok else "NULL"
     rows = await db.fetch_all(
-        """SELECT a.year, a.school_code, a.school_name, a.major_code, a.major_name,
+        f"""SELECT a.year, a.school_code, a.school_name, a.major_code, a.major_name,
                   a.batch, a.lowest_rank, a.lowest_score, a.flags,
                   p.province, p.city, p.level, p.nature, p.type,
-                  p.is_985, p.is_211, p.is_dfc, ct.tier, p.strength_tags
+                  p.is_985, p.is_211, p.is_dfc, ct.tier, {strength_col}
            FROM admission_scores a
            LEFT JOIN school_profiles p ON a.school_code = p.code
            LEFT JOIN cities ct ON p.city = ct.city
@@ -592,6 +622,8 @@ async def _prepare_candidates(
     # 匹配键 = school_code + 标准专业名（catalog_name），辅以招生专业名 major_name
     # 回退；在内存按 (school_code, 专业名) 合并为每单元的 major_strength 列表。
     # 空表/无命中时每个单元得到空列表，不影响既有契约。
+    # 旧库降级（C1）：表不存在时探测已判 False 直接跳过；即便探测与查询之间
+    # 模式有变，查询异常也捕获降级为每单元空列表，不让 /match 整体 500。
     for u in units.values():
         u["major_strength"] = []
     ms_codes = {u["school_code"] for u in units.values() if u["school_code"]}
@@ -601,14 +633,19 @@ async def _prepare_candidates(
             ms_names.add(u["catalog_name"])
         if u["major_name"]:
             ms_names.add(u["major_name"])
-    if ms_codes and ms_names:
-        ms_rows = await db.fetch_all(
-            """SELECT school_code, major_name, source, data_year, tier
-               FROM major_strengths
-               WHERE school_code = ANY(%s) AND major_name = ANY(%s)
-               GROUP BY school_code, major_name, source, data_year, tier""",
-            (list(ms_codes), list(ms_names)),
-        )
+    if ms_codes and ms_names and _ms_ok:
+        try:
+            ms_rows = await db.fetch_all(
+                """SELECT school_code, major_name, source, data_year, tier
+                   FROM major_strengths
+                   WHERE school_code = ANY(%s) AND major_name = ANY(%s)
+                   GROUP BY school_code, major_name, source, data_year, tier""",
+                (list(ms_codes), list(ms_names)),
+            )
+        except psycopg2.Error as e:
+            if not db.schema_missing(e):
+                raise
+            ms_rows = []
         ms_map: dict = defaultdict(list)
         for sc2, mn2, src, dy, tier in ms_rows:
             ms_map[(sc2, mn2)].append(
@@ -679,9 +716,11 @@ async def _prepare_candidates(
             kept.append(c)
         candidates = kept
 
-    # 实力附加键（任务 #8）：统一移到每个候选的最末尾，
+    # 任务 #8 新增键：统一移到每个候选的最末尾（「新键一律末尾」约定），
     # 保证既有键（含选科校验后追加的 subject_* 键）字节顺序不变。
     for c in candidates:
+        c["is_985"] = c.pop("is_985", None)
+        c["is_211"] = c.pop("is_211", None)
         c["strength_tags"] = c.pop("strength_tags", [])
         c["major_strength"] = c.pop("major_strength", [])
 

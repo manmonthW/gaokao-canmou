@@ -57,3 +57,13 @@ async def fetch_all(query, params=None):
 
 async def fetch_one(query, params=None):
     return await run_in_threadpool(_execute, query, params, "one")
+
+
+def schema_missing(exc: Exception) -> bool:
+    """判断异常是否为「旧库未迁移」类模式缺失。
+
+    _execute 原样透传 psycopg2 异常；UndefinedTable（42P01）与
+    UndefinedColumn（42703）表示目标表/列尚未经 migration 建立，
+    服务层可据此降级为新功能隐身（返回空数据），其余错误照常抛出。
+    """
+    return getattr(exc, "pgcode", None) in ("42P01", "42703")

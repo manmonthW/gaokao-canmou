@@ -689,6 +689,7 @@ onMounted(async () => {
                 :strength-tags="row.strength_tags || []"
                 :major-strength="row.major_strength || []"
                 :dictionary="meta?.strength_dictionary"
+                context="match"
                 compact
               />
             </template>

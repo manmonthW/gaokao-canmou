@@ -93,7 +93,7 @@
 
 ---
 
-## 四、当前进展（截至 2026-08-08）
+## 四、当前进展（截至 2026-08-12）
 
 ### ✅ Phase 0 — 已完成
 - 配置安全整改：`.env` 注入 `GAOKAO_DSN`；数据库只读账号 `gaokao_web_ro` 已建并授权（`0000_role.sql` + `0003_grants.sql`）。
@@ -211,6 +211,18 @@
 
 验证：pytest 32 passed；重启后冒烟（`smoke_p1p6.sh`）六项能力全部输出正确（详见 changelog §九）。
 
+### 🔄 Phase 4 继续落地 — 院校学科实力 / 专业强度一期（2026-08-12）
+
+完整记录见 **`docs/changelog-2026-08-12-major-strength.md`**（migration 0014）：
+
+- **五数据源入库**：school_disciplines 6,492（四轮学科评估 5,212 + 双一流学科 435 + 第五轮 A 类 verified 845）；major_strengths 42,039（软科 30,301 + 国一流 11,445 + 省一流 293）。
+- **院校级实力标签**：`school_profiles.strength_tags`（GIN）+ strength_dictionary 词表，build_strength_tags.py 全量幂等重算，732 所命中；「软科」仅专业级明细、不挂校级标。
+- **后端附加式**：match 单元附 strength_tags/major_strength；新增 `GET /schools/{code}/strength`；/meta 末尾附 strength_dictionary（契约只增不改，golden JSON 键序不变）。
+- **前端 StrengthBadges**：Match/SchoolDetail/SchoolDrawer 三挂载点，非官方（五轮）/第三方（软科）角标与免责口径内置。
+- **eval5a 门禁**：三重校验 + 用户签字 S1–S8，裁决 verified 845 / disputed 34（留档不入库）。
+
+验证：pytest 47 passed、smoke 全过、admission_scores=66,959 不变量未动、/match ~5s 基线无劣化。下一迁移编号 **0015**。
+
 ---
 
 ## 五、环境运行方式
@@ -241,9 +253,11 @@ psql -U gaokao    -h localhost -d gaokao -f backend/migrations/0004_indexes.sql
 # 0005–0010 见 migrations/ 目录（按编号顺序执行）
 psql -U gaokao    -h localhost -d gaokao -f backend/migrations/0011_major_flags.sql
 psql -U gaokao    -h localhost -d gaokao -f backend/migrations/0012_subject_requirements.sql
+psql -U gaokao    -h localhost -d gaokao -f backend/migrations/0013_postgrad_rate.sql
+psql -U gaokao    -h localhost -d gaokao -f backend/migrations/0014_major_strength.sql
 ```
 
-> 下一个迁移编号：**0013**。schema 变更纪律与后续开发注意事项见 `docs/changelog-2026-08-08-d2-d5.md` §六。
+> 下一个迁移编号：**0015**。schema 变更纪律与后续开发注意事项见 `docs/changelog-2026-08-08-d2-d5.md` §六。
 
 ---
 

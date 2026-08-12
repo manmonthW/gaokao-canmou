@@ -1,4 +1,6 @@
 """院校与院校专业详情服务。"""
+import psycopg2
+
 from app import db
 from app.config import MAX_PAGE_SIZE
 
@@ -11,24 +13,48 @@ async def get_school_strength(code: str):
     展示口径（与 strength_dictionary 免责语义一致）：
     - school_disciplines 只返回 verify_status='verified' 或 official=TRUE 的行；
       eval5_a 为非官方来源（official=FALSE），未人工核验前不对外返回。
-    - major_strengths 按 source/data_year 排序，LIMIT 500 防极端膨胀。
+    - majors 按官方源优先截断：swyc_national → swyc_provincial → 其余
+      （同为官方口径内再按 data_year/major_name），LIMIT 500 防极端膨胀。
+
+    旧库降级（未跑 0014）：捕获 UndefinedTable/UndefinedColumn，
+    三个明细查询各自返回空列表——实力功能整体隐身，院校详情既有字段不回归。
     """
     basic = await db.fetch_one("SELECT code FROM schools WHERE code=%s", (code,))
     if not basic:
         return None
-    disc_rows = await db.fetch_all(
-        """SELECT discipline_name, source, data_year, grade, official,
-                  verify_status
-           FROM school_disciplines
-           WHERE school_code=%s AND (verify_status = 'verified' OR official = TRUE)
-           ORDER BY source, data_year, discipline_name""", (code,))
-    major_rows = await db.fetch_all(
-        """SELECT major_name, major_code, source, data_year, batch, rank, tier,
-                  note
-           FROM major_strengths WHERE school_code=%s
-           ORDER BY source, data_year LIMIT 500""", (code,))
-    tags_row = await db.fetch_one(
-        "SELECT strength_tags FROM school_profiles WHERE code=%s", (code,))
+    try:
+        disc_rows = await db.fetch_all(
+            """SELECT discipline_name, source, data_year, grade, official,
+                      verify_status
+               FROM school_disciplines
+               WHERE school_code=%s AND (verify_status = 'verified' OR official = TRUE)
+               ORDER BY source, data_year, discipline_name""", (code,))
+    except psycopg2.Error as e:
+        if not db.schema_missing(e):
+            raise
+        disc_rows = []
+    try:
+        major_rows = await db.fetch_all(
+            """SELECT major_name, major_code, source, data_year, batch, rank, tier,
+                      note
+               FROM major_strengths WHERE school_code=%s
+               ORDER BY CASE source
+                            WHEN 'swyc_national' THEN 0
+                            WHEN 'swyc_provincial' THEN 1
+                            ELSE 2
+                        END, data_year, major_name
+               LIMIT 500""", (code,))
+    except psycopg2.Error as e:
+        if not db.schema_missing(e):
+            raise
+        major_rows = []
+    try:
+        tags_row = await db.fetch_one(
+            "SELECT strength_tags FROM school_profiles WHERE code=%s", (code,))
+    except psycopg2.Error as e:
+        if not db.schema_missing(e):
+            raise
+        tags_row = None
     return {
         "disciplines": [
             {"discipline_name": r[0], "source": r[1], "data_year": r[2],
