@@ -35,10 +35,14 @@ def _item(id, title, filename, summary, points, tag):
 
 
 # 由 etl/build_guide_html.py 预先生成的排版 HTML（自包含样式）
-_HTML_DIR = os.path.join(
-    os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(
-        os.path.dirname(os.path.abspath(__file__)))))),
-    "webapp", "backend", "static", "guides",
+# Docker 部署时 static 挂载在 /app/static，可用 GUIDE_HTML_DIR 环境变量覆盖。
+_HTML_DIR = os.environ.get(
+    "GUIDE_HTML_DIR",
+    os.path.join(
+        os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(
+            os.path.dirname(os.path.abspath(__file__)))))),
+        "webapp", "backend", "static", "guides",
+    ),
 )
 
 
