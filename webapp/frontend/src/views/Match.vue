@@ -10,6 +10,7 @@ import PlanBasket from '@/components/PlanBasket.vue'
 import SchoolDrawer from '@/components/SchoolDrawer.vue'
 import MajorDrawer from '@/components/MajorDrawer.vue'
 import StepGuide from '@/components/StepGuide.vue'
+import StrengthBadges from '@/components/StrengthBadges.vue'
 
 const { profile } = useProfile()
 const planner = usePlanner()
@@ -665,6 +666,8 @@ onMounted(async () => {
           <el-table-column prop="school_name" label="院校" min-width="170" show-overflow-tooltip fixed="left">
             <template #default="{ row }">
               <a class="school-link" @click.stop="openSchool(row.school_code)">{{ row.school_name }}</a>
+              <el-tag v-if="row.is_985" size="small" effect="plain" type="danger" class="flag-tag">985</el-tag>
+              <el-tag v-if="row.is_211" size="small" effect="plain" type="primary" class="flag-tag">211</el-tag>
             </template>
           </el-table-column>
           <el-table-column prop="major_name" label="专业" min-width="170" show-overflow-tooltip fixed="left">
@@ -679,6 +682,15 @@ onMounted(async () => {
               >
                 <el-tag :type="flagTagType(f)" size="small" effect="plain" class="flag-tag">{{ flagLabel(f) }}</el-tag>
               </el-tooltip>
+              <!-- 实力标签（任务 #9）：院校级 strength_tags + 专业级摘要（如「国一流专业」）；
+                   文案取自 meta.strength_dictionary，数据为空不渲染、不占位 -->
+              <StrengthBadges
+                v-if="(row.strength_tags || []).length || (row.major_strength || []).length"
+                :strength-tags="row.strength_tags || []"
+                :major-strength="row.major_strength || []"
+                :dictionary="meta?.strength_dictionary"
+                compact
+              />
             </template>
           </el-table-column>
           <el-table-column label="层次/性质/类型" min-width="150">

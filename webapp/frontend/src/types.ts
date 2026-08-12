@@ -53,6 +53,8 @@ export interface MetaResponse {
   types: string[]
   flags: string[]
   major_flags: MajorFlagDef[]
+  /** 院校/专业实力标签词表（任务 #9，migration 0014）；旧后端无此键时为 undefined */
+  strength_dictionary?: StrengthTagDef[]
 }
 
 /** 专业级报考标记词表（D2a）：后端 flag_dictionary */
@@ -61,6 +63,26 @@ export interface MajorFlagDef {
   label: string
   severity: 'notice' | 'warn' | 'block'
   note: string | null
+}
+
+/** 实力标签词表（任务 #9）：后端 strength_dictionary，标签文案与来源口径说明的唯一权威来源 */
+export interface StrengthTagDef {
+  tag: string
+  label: string
+  /** 分类：eval4 四轮学科评估 / eval5 五轮学科评估（非官方汇总） / dfc2022 双一流学科 / swyc 一流专业 / ruanke 软科（第三方） / meta 聚合类 */
+  kind: string
+  third_party: boolean
+  source_note: string | null
+  display_order: number
+}
+
+/** 专业实力条目（任务 #9）：source ∈ swyc_national / swyc_provincial / ruanke */
+export interface MajorStrengthItem {
+  major_name: string
+  source: string
+  /** 第三方评级档位（如 A+/B+）；官方名单为 null */
+  tier: string | null
+  data_year: number | null
 }
 
 // ------------------------------ 定位服务 ------------------------------
@@ -271,6 +293,41 @@ export interface SchoolProfile {
   postgrad_rate: number | null   // 保研率（%，最新年口径）；null=无资格/缺失
 }
 
+/** 学科评估/一流学科记录（任务 #9）：source ∈ eval4_official / eval5_a / dfc2022 */
+export interface StrengthDiscipline {
+  school_code?: string | null
+  discipline_name: string
+  source: string
+  data_year: number | null
+  /** 评级（如 A+/A/A-）；双一流名单无评级为 null */
+  grade: string | null
+  official: boolean
+  verify_status: string | null
+}
+
+/** 专业实力记录（任务 #9）：source ∈ swyc_national / swyc_provincial / ruanke */
+export interface StrengthMajor {
+  school_name?: string | null
+  major_name: string
+  major_code: string | null
+  source: string
+  data_year: number | null
+  /** 入选批次（双万计划 2019-2021 三批；排名类为 null） */
+  batch: number | null
+  /** 第三方排名名次；官方名单为 null */
+  rank: number | null
+  /** 第三方评级档位；官方名单为 null */
+  tier: string | null
+  note: string | null
+}
+
+/** 院校学科实力聚合（任务 #9）：GET /schools/{code} 附加字段 与 GET /schools/{code}/strength */
+export interface SchoolStrength {
+  disciplines: StrengthDiscipline[]
+  majors: StrengthMajor[]
+  strength_tags: string[]
+}
+
 export interface SchoolDetail {
   code: string
   name: string
@@ -278,6 +335,8 @@ export interface SchoolDetail {
   city: CityProfile | null
   yearly_summary: YearlySummary[]
   majors: SchoolMajorBrief[]
+  /** 学科实力聚合（任务 #9）；旧后端无此键时为 undefined，空数据时各列表为空数组 */
+  strength?: SchoolStrength
 }
 
 export interface SchoolMajorRecord {
@@ -495,6 +554,9 @@ export interface MatchCandidate {
   level: string | null
   nature: string | null
   type: string | null
+  /** 院校牌子标签：true 时前端在院校名后展示 985/211 徽章 */
+  is_985?: boolean | null
+  is_211?: boolean | null
   n_years: number
   has_both_years: boolean
   best_rank: number
@@ -531,6 +593,10 @@ export interface MatchCandidate {
   /** 未收录拆分：major_missing 专业未收录（学校在表）/ school_missing 院校未收录 */
   subject_status?: 'major_missing' | 'school_missing'
   yearly: MatchYearly[]
+  /** 院校级实力标签（任务 #9，值域=strength_dictionary.tag）；空数组=暂无收录 */
+  strength_tags?: string[]
+  /** 专业实力（任务 #9）：国/省一流专业、软科评级等；空数组=暂无收录 */
+  major_strength?: MajorStrengthItem[]
 }
 
 export interface MatchFacetItem {

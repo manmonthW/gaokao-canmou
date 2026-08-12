@@ -14,6 +14,16 @@ async def school_detail(code: str):
     return detail
 
 
+@router.get("/{code}/strength")
+async def school_strength(code: str):
+    """院校学科实力（任务 #8）：学科评估/一流学科、一流专业与第三方评级、
+    院校级实力标签；未收录时各列表为空。"""
+    data = await svc.get_school_strength(code)
+    if not data:
+        raise HTTPException(status_code=404, detail=f"院校不存在：{code}")
+    return {"code": code, **data}
+
+
 @router.get("/{code}/major")
 async def school_major_detail(
     code: str,

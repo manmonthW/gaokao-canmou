@@ -38,6 +38,11 @@ async def get_meta():
     # 专业级报考标记词表（D2a，migration 0011）：前端筛选与文案统一来源
     major_flag_rows = await db.fetch_all(
         "SELECT flag, label, severity, note FROM flag_dictionary ORDER BY flag")
+    # 院校/专业实力标签词表（任务 #8，migration 0014）：
+    # strength_tags 展示文案与第三方免责口径的唯一权威来源
+    strength_tag_rows = await db.fetch_all(
+        """SELECT tag, label, kind, third_party, source_note, display_order
+           FROM strength_dictionary ORDER BY display_order, tag""")
 
     # 组装科类→批次映射
     batches_by_category: dict[str, list[str]] = {}
@@ -66,5 +71,10 @@ async def get_meta():
         "major_flags": [
             {"flag": r[0], "label": r[1], "severity": r[2], "note": r[3]}
             for r in major_flag_rows
+        ],
+        "strength_dictionary": [
+            {"tag": r[0], "label": r[1], "kind": r[2], "third_party": r[3],
+             "source_note": r[4], "display_order": r[5]}
+            for r in strength_tag_rows
         ],
     }

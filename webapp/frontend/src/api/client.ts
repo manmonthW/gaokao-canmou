@@ -61,6 +61,7 @@ import type {
   MajorCatalogItem,
   MajorDetail,
   SchoolDetail,
+  SchoolStrength,
   SchoolMajorRecord,
   ControlLine,
   PagedScoreRank,
@@ -115,6 +116,8 @@ export const api = {
   hotImageUrl: (name: string) =>
     `${ORIGIN}${PREFIX}/major-catalog/hot-image${buildQuery({ name })}`,
   school: (code: string) => getJson<SchoolDetail>(`/schools/${code}`),
+  // 院校学科实力聚合（任务 #9）：未知院校后端返回 404
+  schoolStrength: (code: string) => getJson<SchoolStrength>(`/schools/${code}/strength`),
   schoolMajor: (code: string, p: Record<string, unknown>) =>
     getJson<SchoolMajorRecord[]>(`/schools/${code}/major${buildQuery(p)}`),
   controlLines: (p: Record<string, unknown>) =>

@@ -427,6 +427,9 @@ def _build_candidate(unit: dict, R: int, cfg: dict):
         "school_tier": (0 if unit.get("is_985") else 1 if unit.get("is_211")
                         else 2 if unit.get("is_dfc") else 3),
         "city_tier": unit.get("city_tier"),
+        # 院校牌子标签（前端院校名后展示；均否时不渲染）
+        "is_985": unit.get("is_985"),
+        "is_211": unit.get("is_211"),
         "flags": unit["flags"],
         "n_years": unit["n_years"],
         "has_both_years": unit["has_both_years"],
@@ -451,6 +454,9 @@ def _build_candidate(unit: dict, R: int, cfg: dict):
         "rank_diff_last": rank_diff_last,
         "warning": warning,
         "yearly": [{"year": y, "lowest_rank": r} for y, r in unit["yearly"]],
+        # 院校/专业实力附加信息（任务 #8，附加式置于末尾）：空表/无收录时为空数组
+        "strength_tags": unit.get("strength_tags", []),
+        "major_strength": unit.get("major_strength", []),
     }
 
 
@@ -482,7 +488,7 @@ async def _prepare_candidates(
         """SELECT a.year, a.school_code, a.school_name, a.major_code, a.major_name,
                   a.batch, a.lowest_rank, a.lowest_score, a.flags,
                   p.province, p.city, p.level, p.nature, p.type,
-                  p.is_985, p.is_211, p.is_dfc, ct.tier
+                  p.is_985, p.is_211, p.is_dfc, ct.tier, p.strength_tags
            FROM admission_scores a
            LEFT JOIN school_profiles p ON a.school_code = p.code
            LEFT JOIN cities ct ON p.city = ct.city
@@ -498,7 +504,7 @@ async def _prepare_candidates(
     for (
         y, sc, sn, mc, mn, bt, lr, lscore, fl,
         prov, cty, lvl, nat, typ,
-        is985, is211, isdfc, ctier,
+        is985, is211, isdfc, ctier, stags,
     ) in rows:
         key = _build_unit_key(sc, mc, mn, bt)
         u = units.get(key)
@@ -512,6 +518,8 @@ async def _prepare_candidates(
                 "nature": nat, "type": typ,
                 "is_985": is985, "is_211": is211, "is_dfc": isdfc,
                 "city_tier": ctier,
+                # 院校级实力标签（LEFT JOIN 无画像时为 NULL → 空数组）
+                "strength_tags": list(stags or []),
                 "years": [], "ranks": [], "yearly": [], "scores": {},
                 "rank_years": set(),
                 "flags": set(),
@@ -579,6 +587,46 @@ async def _prepare_candidates(
     for u in units.values():
         u["catalog_name"] = catalog_map.get(u["major_name"])
 
+    # ---------- 第四步（补充）：批量关联专业实力（major_strengths） ----------
+    # 一条 GROUP BY 批量查询覆盖全部候选单元（严禁逐单元查询，避免 N+1）：
+    # 匹配键 = school_code + 标准专业名（catalog_name），辅以招生专业名 major_name
+    # 回退；在内存按 (school_code, 专业名) 合并为每单元的 major_strength 列表。
+    # 空表/无命中时每个单元得到空列表，不影响既有契约。
+    for u in units.values():
+        u["major_strength"] = []
+    ms_codes = {u["school_code"] for u in units.values() if u["school_code"]}
+    ms_names = set()
+    for u in units.values():
+        if u.get("catalog_name"):
+            ms_names.add(u["catalog_name"])
+        if u["major_name"]:
+            ms_names.add(u["major_name"])
+    if ms_codes and ms_names:
+        ms_rows = await db.fetch_all(
+            """SELECT school_code, major_name, source, data_year, tier
+               FROM major_strengths
+               WHERE school_code = ANY(%s) AND major_name = ANY(%s)
+               GROUP BY school_code, major_name, source, data_year, tier""",
+            (list(ms_codes), list(ms_names)),
+        )
+        ms_map: dict = defaultdict(list)
+        for sc2, mn2, src, dy, tier in ms_rows:
+            ms_map[(sc2, mn2)].append(
+                {"major_name": mn2, "source": src, "tier": tier,
+                 "data_year": dy})
+        for u in units.values():
+            merged: dict = {}
+            # catalog_name 优先，major_name 回退；两者同值时天然去重
+            for nm in (u.get("catalog_name"), u["major_name"]):
+                if not nm:
+                    continue
+                for item in ms_map.get((u["school_code"], nm), []):
+                    merged[(item["major_name"], item["source"],
+                            item["tier"], item["data_year"])] = item
+            u["major_strength"] = sorted(
+                merged.values(),
+                key=lambda d: (str(d["source"]), str(d["major_name"])))
+
     # ---------- 第四步之后：构造候选 ----------
     candidates = [_build_candidate(u, rank, cfg) for u in units.values()]
 
@@ -630,6 +678,12 @@ async def _prepare_candidates(
                     c["warning"] = f"{c['warning']} {w}" if c["warning"] else w
             kept.append(c)
         candidates = kept
+
+    # 实力附加键（任务 #8）：统一移到每个候选的最末尾，
+    # 保证既有键（含选科校验后追加的 subject_* 键）字节顺序不变。
+    for c in candidates:
+        c["strength_tags"] = c.pop("strength_tags", [])
+        c["major_strength"] = c.pop("major_strength", [])
 
     # 应用偏好筛选（省/市/层次/性质/类型/专业关键词/两年均有/排除标记）
     def keep(c):

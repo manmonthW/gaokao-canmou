@@ -2,6 +2,7 @@
 import { ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { api } from '@/api/client'
+import StrengthBadges from '@/components/StrengthBadges.vue'
 
 /**
  * 院校详情抽屉：从主线（如智能匹配结果）内查看院校画像，
@@ -77,6 +78,10 @@ function openFullPage() {
           <el-tooltip v-if="data.profile.postgrad_rate != null" content="保研率：本科毕业生获推免读研资格的比例（最新年口径，仅供参考）" placement="top">
             <el-tag size="small" type="primary" effect="plain">保研 {{ data.profile.postgrad_rate }}%</el-tag>
           </el-tooltip>
+        </div>
+        <!-- 实力标签（任务 #9）：紧凑徽章行，空数组不渲染；词表由组件自取（模块级缓存） -->
+        <div v-if="data.strength?.strength_tags?.length" class="tags">
+          <StrengthBadges :strength-tags="data.strength.strength_tags" compact />
         </div>
         <div class="kv">
           <div><span class="k">省份/城市</span><span class="v">{{ data.profile.province || '—' }} · {{ data.profile.city || '—' }}</span></div>
