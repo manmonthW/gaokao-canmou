@@ -42,19 +42,20 @@ const scoreError = ref<string | null>(null)
 const scoreSearched = ref(false)
 
 onMounted(async () => {
-  meta.value = await api.meta().catch(() => null)
-  disciplines.value = await api.catalogDisciplines().catch(() => [])
+  // 三个初始请求并行发出（互不依赖），避免串行等待
+  const [metaRes, discRes, hotRows] = await Promise.all([
+    api.meta().catch(() => null),
+    api.catalogDisciplines().catch(() => []),
+    api.catalogSearch({ limit: 500 }).catch(() => [] as MajorCatalogItem[]),
+  ])
+  meta.value = metaRes
+  disciplines.value = discRes
   // 热门专业名称列表（用于快捷入口卡片）
-  hotMajors.value = await api
-    .catalogSearch({ limit: 500 })
-    .then((rows) =>
-      rows
-        .filter((r) => r.has_admission)
-        .sort((a, b) => b.school_count - a.school_count)
-        .map((r) => r.name)
-        .slice(0, 24),
-    )
-    .catch(() => [])
+  hotMajors.value = hotRows
+    .filter((r) => r.has_admission)
+    .sort((a, b) => b.school_count - a.school_count)
+    .map((r) => r.name)
+    .slice(0, 24)
 })
 
 // 当前门类下的专业类（用于筛选下拉）

@@ -7,6 +7,12 @@
 - 因此关联时不要求精确相等，而用 major_name ILIKE '%标准名%' 做"包含"匹配，
   把分散在该标准专业下的招生记录聚合成一个视图，给出院校数 + 分数区间。
 - 另外提供门类/专业类的导航（13 门类 → 专业类 → 专业），支持浏览式探索。
+
+性能（0015）：
+- ILIKE 双侧通配无法走索引，737 专业 × 6.7 万分数的实时聚合每次约 25s。
+  分数数据一年只在年度投档入库时变一次，故聚合结果预计算进
+  major_admission_summary（etl/load_major_summary.py 全量重建），
+  读路径直连汇总表；旧库未跑 0015 时降级回原实时 ILIKE 查询，功能不回归。
 """
 from app import db
 from app.config import MAX_PAGE_SIZE
@@ -66,22 +72,40 @@ async def search_catalog(
         params.append(category)
     params.append(limit)
 
-    rows = await db.fetch_all(
-        f"""SELECT mc.code, mc.name, mc.category, mc.discipline,
-                   count(DISTINCT a.school_code) FILTER (WHERE a.school_code IS NOT NULL) AS school_cnt,
-                   min(a.lowest_score) FILTER (WHERE a.school_code IS NOT NULL),
-                   max(a.lowest_score) FILTER (WHERE a.school_code IS NOT NULL),
-                   min(a.lowest_rank) FILTER (WHERE a.school_code IS NOT NULL),
-                   max(a.lowest_rank) FILTER (WHERE a.school_code IS NOT NULL)
-            FROM major_catalog mc
-            LEFT JOIN admission_scores a
-                   ON a.major_name ILIKE '%%' || mc.name || '%%'
-            {where}
-            GROUP BY mc.code, mc.name, mc.category, mc.discipline
-            ORDER BY school_cnt DESC NULLS LAST, mc.discipline, mc.category, mc.name
-            LIMIT %s""",
-        params,
-    )
+    try:
+        # 快路径：直连 0015 预计算汇总表（年度投档入库后由 ETL 重建）
+        rows = await db.fetch_all(
+            f"""SELECT mc.code, mc.name, mc.category, mc.discipline,
+                       COALESCE(s.school_count, 0),
+                       s.min_score, s.max_score, s.min_rank, s.max_rank
+                FROM major_catalog mc
+                LEFT JOIN major_admission_summary s
+                       ON s.code = mc.code AND s.name = mc.name
+                {where}
+                ORDER BY COALESCE(s.school_count, 0) DESC, mc.discipline, mc.category, mc.name
+                LIMIT %s""",
+            params,
+        )
+    except Exception as e:
+        if not db.schema_missing(e):
+            raise
+        # 旧库降级（未跑 0015）：回退实时 ILIKE 全表聚合，慢但可用
+        rows = await db.fetch_all(
+            f"""SELECT mc.code, mc.name, mc.category, mc.discipline,
+                       count(DISTINCT a.school_code) FILTER (WHERE a.school_code IS NOT NULL) AS school_cnt,
+                       min(a.lowest_score) FILTER (WHERE a.school_code IS NOT NULL),
+                       max(a.lowest_score) FILTER (WHERE a.school_code IS NOT NULL),
+                       min(a.lowest_rank) FILTER (WHERE a.school_code IS NOT NULL),
+                       max(a.lowest_rank) FILTER (WHERE a.school_code IS NOT NULL)
+                FROM major_catalog mc
+                LEFT JOIN admission_scores a
+                       ON a.major_name ILIKE '%%' || mc.name || '%%'
+                {where}
+                GROUP BY mc.code, mc.name, mc.category, mc.discipline
+                ORDER BY school_cnt DESC NULLS LAST, mc.discipline, mc.category, mc.name
+                LIMIT %s""",
+            params,
+        )
     return [
         {
             "code": r[0],

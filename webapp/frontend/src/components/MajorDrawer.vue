@@ -62,9 +62,7 @@ function viewAdmission(name: string) {
       </div>
     </template>
 
-    <div v-if="loading" class="loading">
-      <el-icon class="is-loading"><Loading /></el-icon> 加载中…
-    </div>
+    <div v-if="loading" class="loading">加载中…</div>
 
     <template v-else-if="data">
       <!-- 基础信息 -->
