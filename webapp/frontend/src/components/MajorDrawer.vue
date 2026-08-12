@@ -135,11 +135,8 @@ function viewAdmission(name: string) {
           <p class="d-p">{{ data.hot_profile.subject_req }}</p>
         </div>
 
-        <div class="d-section" v-if="data.hot_profile.career">
-          <h4 class="d-h">就业前景</h4>
-          <p class="d-p">{{ data.hot_profile.career }}</p>
-        </div>
-
+        <!-- 就业前景（career，PNG OCR）与就业方向语义重复，且 31 行均有
+             employment_dir 覆盖，页面不再单列，避免重复区块 -->
         <div class="d-section" v-if="data.hot_profile.training_goal">
           <h4 class="d-h">培养目标</h4>
           <p class="d-p">{{ data.hot_profile.training_goal }}</p>
