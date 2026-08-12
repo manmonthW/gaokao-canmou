@@ -55,20 +55,31 @@ const favFiltered = computed(() =>
 
 // ---------- 对比 ----------
 const compareList = computed(() => planner.compareItems())
-const COMPARE_ROWS: { label: string; get: (c: CandidateSnapshot) => string }[] = [
-  { label: '风险档', get: (c) => c.risk },
-  { label: '批次', get: (c) => c.batch },
-  { label: '省份/城市', get: (c) => `${c.province || '—'}${c.city ? '·' + c.city : ''}` },
-  { label: '层次/性质/类型', get: (c) => [c.level, c.nature, c.type].filter(Boolean).join(' / ') || '—' },
-  { label: '最近年位次', get: (c) => fmt(c.last_year_rank) },
-  { label: '近一年最低分', get: (c) => (c.last_year_score != null ? String(c.last_year_score) : '—') },
-  { label: '最好 / 最差 / 中位', get: (c) => `${fmt(c.best_rank)} / ${fmt(c.worst_rank)} / ${fmt(c.median_rank)}` },
-  { label: '位次跨度（波动）', get: (c) => `${fmt(c.span)}${c.relative_vol != null ? `（${Math.round(c.relative_vol * 100)}%）` : ''}` },
-  { label: '覆盖年份', get: (c) => `${c.n_years} 年` },
-  { label: '本人位次差', get: (c) => diffText(c.rank_diff_last) },
-  { label: '判定依据', get: (c) => c.risk_reason },
-  { label: '数据版本', get: (c) => c.data_version || '—' },
-]
+// 门槛位次改为分年展示（2024 / 2025 / 2026…）：年份取自 meta.history_years，
+// 年度接入后自动扩展；单元缺某年数据时该格显示 —（不适用）
+const compareRows = computed<{ label: string; get: (c: CandidateSnapshot) => string }[]>(() => {
+  const years = [...((meta.value?.history_years ?? []) as number[])].sort((a, b) => a - b)
+  return [
+    { label: '风险档', get: (c) => c.risk },
+    { label: '批次', get: (c) => c.batch },
+    { label: '省份/城市', get: (c) => `${c.province || '—'}${c.city ? '·' + c.city : ''}` },
+    { label: '层次/性质/类型', get: (c) => [c.level, c.nature, c.type].filter(Boolean).join(' / ') || '—' },
+    { label: '最近年位次', get: (c) => fmt(c.last_year_rank) },
+    { label: '近一年最低分', get: (c) => (c.last_year_score != null ? String(c.last_year_score) : '—') },
+    {
+      label: years.length ? `门槛位次（${years.join(' / ')}）` : '门槛位次（分年）',
+      get: (c) => years.map((y) => {
+        const t = (c.yearly || []).find((it) => it.year === y)
+        return t && t.lowest_rank != null ? fmt(t.lowest_rank) : '—'
+      }).join(' / '),
+    },
+    { label: '位次跨度（波动）', get: (c) => `${fmt(c.span)}${c.relative_vol != null ? `（${Math.round(c.relative_vol * 100)}%）` : ''}` },
+    { label: '覆盖年份', get: (c) => `${c.n_years} 年` },
+    { label: '本人位次差', get: (c) => diffText(c.rank_diff_last) },
+    { label: '判定依据', get: (c) => c.risk_reason },
+    { label: '数据版本', get: (c) => c.data_version || '—' },
+  ]
+})
 
 // ---------- 方案 ----------
 const activePlanId = ref<string>(plans.value[0]?.id || '')
@@ -545,7 +556,7 @@ async function exportPlan(p: VolunteerPlan) {
                   </tr>
                 </thead>
                 <tbody>
-                  <tr v-for="r in COMPARE_ROWS" :key="r.label">
+                  <tr v-for="r in compareRows" :key="r.label">
                     <td class="cmp__attr">{{ r.label }}</td>
                     <td v-for="c in compareList" :key="c.id" :class="{ 'cmp__risk': r.label === '风险档' }">
                       <el-tag v-if="r.label === '风险档'" :type="RISK_TYPE[c.risk] as any" size="small">{{ c.risk }}</el-tag>
