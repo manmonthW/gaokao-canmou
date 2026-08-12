@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, watch } from 'vue'
+import { ref, computed, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { api } from '@/api/client'
 import type { MajorDetail } from '@/types'
@@ -16,6 +16,20 @@ const router = useRouter()
 const open = ref(false)
 const data = ref<MajorDetail | null>(null)
 const loading = ref(false)
+
+// 第五轮学科评估：按 A+ → A → A- 顺序展示
+const EVAL5_ORDER = ['A+', 'A', 'A-']
+const eval5Grades = computed(() => {
+  if (!data.value?.eval5?.grades) return []
+  return EVAL5_ORDER.filter((g) => (data.value!.eval5.grades[g]?.length ?? 0) > 0)
+})
+
+// 评级等级 → 样式 tier（与 StrengthBadges 一致：A+ 金 / A 橙 / A- 琥珀）
+function gradeTier(label: string): string {
+  if (label === 'A+') return 'top'
+  if (label === 'A') return 'high'
+  return 'mid'
+}
 
 watch(
   () => props.name,
@@ -92,6 +106,28 @@ function viewAdmission(name: string) {
         <div class="d-section" v-if="data.hot_profile.introduction">
           <h4 class="d-h">专业介绍</h4>
           <p class="d-p">{{ data.hot_profile.introduction }}</p>
+        </div>
+
+        <!-- 第五轮学科评估 -->
+        <div class="d-section" v-if="data.eval5 && data.eval5.discipline">
+          <h4 class="d-h">
+            第五轮学科评估
+            <el-tooltip :content="`对应学科：${data.eval5.discipline}。教育部第五轮学科评估结果（A+/A/A-），来自各校公开发布汇总，官方未集中公布完整名单，仅供参考。`" placement="top" effect="dark">
+              <i class="d-help">ⓘ</i>
+            </el-tooltip>
+          </h4>
+          <div class="eval5-block">
+            <div
+              v-for="g in eval5Grades"
+              :key="g"
+              class="eval5-row"
+            >
+              <span class="eval5-grade" :class="'eval5-grade--' + gradeTier(g)">{{ g }}</span>
+              <div class="eval5-schools">
+                <span v-for="s in data.eval5.grades[g]" :key="s" class="eval5-school">{{ s }}</span>
+              </div>
+            </div>
+          </div>
         </div>
 
         <div class="d-section" v-if="data.hot_profile.subject_req">
@@ -176,4 +212,51 @@ function viewAdmission(name: string) {
 .d-schools { display: flex; flex-wrap: wrap; gap: var(--space-2); }
 .d-school { margin: 0; }
 .d-adm-btn { width: 100%; }
+
+/* 第五轮学科评估区块 */
+.d-help {
+  font-style: normal;
+  font-size: 12px;
+  color: var(--el-color-info);
+  cursor: help;
+  margin-left: 4px;
+  vertical-align: middle;
+}
+.eval5-block { display: flex; flex-direction: column; gap: 6px; }
+.eval5-row { display: flex; align-items: flex-start; gap: 8px; }
+.eval5-grade {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 1.35;
+  padding: 0 6px;
+  border-radius: 2px;
+  white-space: nowrap;
+  margin-top: 1px;
+}
+.eval5-grade--top {
+  color: #92400e;
+  background: linear-gradient(135deg, #fef3c7, #fde68a);
+  border: 1px solid #f59e0b;
+}
+.eval5-grade--high {
+  color: #7c2d12;
+  background: linear-gradient(135deg, #ffedd5, #fed7aa);
+  border: 1px solid #f97316;
+}
+.eval5-grade--mid {
+  color: #78350f;
+  background: linear-gradient(135deg, #fef9c3, #fef08a);
+  border: 1px solid #eab308;
+}
+.eval5-schools {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+  font-size: var(--text-sm);
+  line-height: 1.5;
+}
+.eval5-school { color: var(--color-text); }
 </style>

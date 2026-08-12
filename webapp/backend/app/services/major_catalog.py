@@ -121,15 +121,58 @@ async def search_catalog(
     ]
 
 
+async def get_major_eval5(name: str):
+    """返回该专业对应的第五轮学科评估 A 类结果。
+
+    通过 major_eval_map 将本科专业名映射到学科评估学科名，
+    再 JOIN school_disciplines（source='eval5_a', verify_status='verified'）
+    取出 A+/A/A- 各等级院校清单。
+
+    返回结构：
+      {
+        "discipline": str | None,   # 映射到的学科名（无则 None）
+        "grades": {                  # 按等级分组的院校名列表（已排序）
+          "A+": [...], "A": [...], "A-": [...]
+        }
+      }
+    无对应评估数据时 discipline=None, grades={}
+    """
+    row = await db.fetch_one(
+        """SELECT m.eval_discipline
+           FROM major_eval_map m
+           WHERE m.major_name=%s
+           LIMIT 1""",
+        (name,),
+    )
+    if not row:
+        return {"discipline": None, "grades": {}}
+    discipline = row[0]
+
+    rows = await db.fetch_all(
+        """SELECT sd.grade, sd.school_name
+           FROM school_disciplines sd
+           WHERE sd.discipline_name=%s
+             AND sd.source='eval5_a'
+             AND sd.verify_status='verified'
+           ORDER BY sd.grade, sd.school_name""",
+        (discipline,),
+    )
+    grades: dict[str, list[str]] = {}
+    for grade, school in rows:
+        grades.setdefault(grade, []).append(school)
+    return {"discipline": discipline, "grades": grades}
+
+
 async def get_major_detail(name: str):
     """返回标准专业详情：基本信息 + 热门专业图文（若 OCR 资料存在）。
 
     返回字段：
-      code, name, category, discipline,
-      hot_profile: { degree, length, gender_ratio, introduction, subject_req,
-                     career, training_goal, discipline_req, main_courses,
-                     postgrad_dir, employment_dir, hot_schools, image_path,
-                     has_image } | None
+     code, name, category, discipline,
+     hot_profile: { degree, length, gender_ratio, introduction, subject_req,
+                    career, training_goal, discipline_req, main_courses,
+                    postgrad_dir, employment_dir, hot_schools, image_path,
+                    has_image } | None
+     eval5: { discipline, grades } 第五轮学科评估 A 类结果
     """
     row = await db.fetch_one(
         """SELECT mc.code, mc.name, mc.category, mc.discipline,
@@ -171,10 +214,14 @@ async def get_major_detail(name: str):
             "level_raw": row[21],
         }
 
+    # 第五轮学科评估 A 类结果（经 major_eval_map 关联到该专业）
+    eval5 = await get_major_eval5(name)
+
     return {
         "code": row[0],
         "name": row[1],
         "category": row[2],
         "discipline": row[3],
         "hot_profile": hot,
+        "eval5": eval5,
     }

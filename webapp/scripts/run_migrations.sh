@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# 执行 0011/0012/0013/0014/0015 迁移并回读验证（全部幂等可重跑）
+# 执行 0011–0016 迁移并回读验证（全部幂等可重跑）
 set -e
 cd /home/ekewang/projects/gaokao/ln
 export PGPASSWORD=gaokao123
@@ -14,6 +14,8 @@ psql -U gaokao -h localhost -d gaokao -v ON_ERROR_STOP=1 \
   -f webapp/backend/migrations/0014_major_strength.sql
 psql -U gaokao -h localhost -d gaokao -v ON_ERROR_STOP=1 \
   -f webapp/backend/migrations/0015_major_admission_summary.sql
+psql -U gaokao -h localhost -d gaokao -v ON_ERROR_STOP=1 \
+  -f webapp/backend/migrations/0016_major_name_map.sql
 
 echo "== flag_dictionary =="
 psql -U gaokao -h localhost -d gaokao -c "SELECT flag,label,severity FROM flag_dictionary ORDER BY flag;"
@@ -31,3 +33,5 @@ echo "== strength_tags column =="
 psql -U gaokao -h localhost -d gaokao -tAc "SELECT column_name FROM information_schema.columns WHERE table_name='school_profiles' AND column_name='strength_tags';"
 echo "== major_admission_summary (0015) =="
 psql -U gaokao -h localhost -d gaokao -tAc "SELECT count(*) FROM major_admission_summary;"
+echo "== major_name_map (0016) =="
+psql -U gaokao -h localhost -d gaokao -tAc "SELECT count(*) FROM major_name_map;"

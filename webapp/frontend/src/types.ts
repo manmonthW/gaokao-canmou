@@ -234,12 +234,18 @@ export interface HotProfile {
   has_image: boolean
 }
 
+export interface MajorEval5 {
+  discipline: string | null
+  grades: Record<string, string[]>
+}
+
 export interface MajorDetail {
   code: string
   name: string
   category: string
   discipline: string
   hot_profile: HotProfile | null
+  eval5: MajorEval5
 }
 
 export interface CityProfile {
@@ -738,7 +744,7 @@ export interface ExamineeProfile {
   rank_lo?: number | null
   rank_hi?: number | null
   /** P5 偏好最小版：同档内排序依据 */
-  pref_sort?: 'certainty' | 'level' | 'city'
+  pref_sort?: 'certainty' | 'level' | 'city' | 'major'
   /** P5 偏好最小版：不能接受高学费（中外合作等代理标记） */
   tuition_cap?: boolean
 }

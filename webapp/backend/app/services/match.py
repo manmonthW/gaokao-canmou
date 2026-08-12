@@ -25,7 +25,7 @@ A1–A4 算法层增强（2026-08-08，依据 first-principles-review.md §5.2�
     （R <= lowest_rank 表示考生位次优于该门槛，等价的分数更高）。
 """
 import re
-from collections import defaultdict
+from collections import defaultdict, OrderedDict
 from statistics import median
 from typing import Optional
 
@@ -55,6 +55,24 @@ async def _strength_available() -> tuple:
         except psycopg2.Error:
             _strength_schema = (False, False)
     return _strength_schema
+
+# --------------------------- 候选管线缓存（方案一优化，0016） ---------------------------
+# _prepare_candidates 的输出只依赖入参与库内数据，与前端分页/切档/偏好切换无关；
+# 交互中同一候选集被反复重算（基线约 9s/次）。按 (data_version + 全部入参)
+# 缓存：年度投档入库后 data_version 变化，旧键自然失效；超容量淘汰最旧。
+_PREPARE_CACHE: "OrderedDict[tuple, tuple]" = OrderedDict()
+_PREPARE_CACHE_MAX = 64
+
+
+def _prepare_cache_key(**kw) -> tuple:
+    """把入参规范化为可哈希缓存键（list/set/dict 一律展开为有序元组）。"""
+    def norm(v):
+        if isinstance(v, dict):
+            return tuple(sorted((k, norm(x)) for k, x in v.items()))
+        if isinstance(v, (list, set, tuple)):
+            return tuple(sorted(str(x) for x in v))
+        return v
+    return tuple(sorted((k, norm(v)) for k, v in kw.items()))
 
 # --------------------------- 可调阈值（margin 已经 2025→2026 回测固化，其余阈值附回测依据） ---------------------------
 MATCH_CONFIG = {
@@ -88,7 +106,28 @@ RISK_ORDER = ["保", "稳", "冲", "高波动", "数据不足"]
 
 # P5 偏好最小版：同档内重排依据（仅改展示顺序，不改资格与分档）
 CITY_TIER_ORDER = ["一线", "新一线", "二线", "三线", "四线", "五线"]
-PREF_SORT_OPTIONS = {"certainty", "level", "city"}
+PREF_SORT_OPTIONS = {"certainty", "level", "city", "major"}
+
+# major（专业优先）：专业实力来源口径分级，数值小者靠前。
+# 官方名单（双万计划国家级/省级一流专业建设点）优先于第三方评级（软科），
+# 无实力记录的单元殿后（9）；同为软科时再按评级档位（A+ 最强）。
+_MAJOR_SOURCE_RANK = {"swyc_national": 0, "swyc_provincial": 1, "ruanke": 2}
+_RUANKE_TIER_RANK = {"A+": 0, "A": 1, "A-": 2, "B+": 3, "B": 4,
+                     "B-": 5, "C+": 6, "C": 7, "C-": 8}
+
+
+def _major_strength_key(c: dict):
+    """专业优先排序键 (来源分级, 软科档位)；无记录返回 (9, 9) 排最后。"""
+    ms = c.get("major_strength") or []
+    if not ms:
+        return (9, 9)
+    best = min(_MAJOR_SOURCE_RANK.get(m.get("source"), 3) for m in ms)
+    tier = 9
+    for m in ms:
+        if m.get("source") == "ruanke" and m.get("tier"):
+            tier = min(tier, _RUANKE_TIER_RANK.get(m["tier"], 9))
+    return (best, tier)
+
 
 # A4 批次别名归一（仅用于跨年单元合并，展示仍用原始批次名，不改数据）：
 # 2026 本科提前批拆为 A/B 段后，与 2025「本科提前批」为同一批次概念。
@@ -507,6 +546,18 @@ async def _prepare_candidates(
 ):
     """第 2–4 步 + 选科校验 + 偏好筛选：返回筛选后候选（match 与 sensitivity 共用，A3）。
     返回 (filtered, candidates_all, excluded_first, excluded_re, subjreq_loaded)。"""
+    # ---------- 管线缓存（方案一）：同参数 + 同 data_version 直接复用 ----------
+    version = await get_data_version()
+    cache_key = (version, _prepare_cache_key(
+        category=category, subject=subject, batch=batch, year=year, rank=rank,
+        province=province, city=city, level=level, nature=nature, type_=type_,
+        major_keyword=major_keyword, has_both_years=has_both_years,
+        exclude_flags=exclude_flags, electives=electives, cfg=cfg))
+    hit = _PREPARE_CACHE.get(cache_key)
+    if hit is not None:
+        _PREPARE_CACHE.move_to_end(cache_key)
+        return hit
+
     # ---------- 第二步：资格/数据过滤 ----------
     # 包含 lowest_rank 为空行（库内约 570 行）：这些归入「数据不足」档，
     # 按 roadmap 要求降级为「分数参考」并显式标注，而非直接丢弃。
@@ -602,18 +653,31 @@ async def _prepare_candidates(
     major_names = {u["major_name"] for u in units.values() if u["major_name"]}
     catalog_map: dict[str, str] = {}
     if major_names:
-        # 一次性查库：标准专业名被招生专业名包含即视为命中
-        rows = await db.fetch_all(
-            """SELECT mc.name, a.major_name
-               FROM major_catalog mc
-               JOIN admission_scores a ON a.major_name ILIKE '%%' || mc.name || '%%'
-               WHERE a.major_name = ANY(%s)""",
-            (list(major_names),),
-        )
-        for std_name, adm_name in rows:
-            # 同一招生名可能命中多个标准专业，取最长的（最具体）
-            if adm_name not in catalog_map or len(std_name) > len(catalog_map[adm_name]):
-                catalog_map[adm_name] = std_name
+        try:
+            # 快路径：0016 预计算映射表（etl/load_major_name_map.py 年度入库后
+            # 重建），精确匹配毫秒级；原实时 ILIKE 聚合千万级比对、每次十秒级
+            map_rows = await db.fetch_all(
+                "SELECT admission_name, catalog_name FROM major_name_map "
+                "WHERE admission_name = ANY(%s)",
+                (list(major_names),),
+            )
+            catalog_map = {adm: std for adm, std in map_rows}
+        except Exception as e:
+            if not db.schema_missing(e):
+                raise
+            # 旧库降级（未跑 0016）：回退实时 ILIKE 聚合，慢但可用；
+            # 口径与 ETL 一致：包含即命中，多命中取最长标准名
+            rows = await db.fetch_all(
+                """SELECT mc.name, a.major_name
+                   FROM major_catalog mc
+                   JOIN admission_scores a ON a.major_name ILIKE '%%' || mc.name || '%%'
+                   WHERE a.major_name = ANY(%s)""",
+                (list(major_names),),
+            )
+            for std_name, adm_name in rows:
+                # 同一招生名可能命中多个标准专业，取最长的（最具体）
+                if adm_name not in catalog_map or len(std_name) > len(catalog_map[adm_name]):
+                    catalog_map[adm_name] = std_name
     for u in units.values():
         u["catalog_name"] = catalog_map.get(u["major_name"])
 
@@ -745,7 +809,13 @@ async def _prepare_candidates(
         return True
 
     filtered = [c for c in candidates if keep(c)]
-    return filtered, candidates, excluded_first, excluded_re, subjreq_loaded
+    result = (filtered, candidates, excluded_first, excluded_re, subjreq_loaded)
+    # 入缓存（超容量淘汰最旧）；调用方不得就地修改返回的候选 dict
+    _PREPARE_CACHE[cache_key] = result
+    _PREPARE_CACHE.move_to_end(cache_key)
+    while len(_PREPARE_CACHE) > _PREPARE_CACHE_MAX:
+        _PREPARE_CACHE.popitem(last=False)
+    return result
 
 
 def _risk_at(c: dict, R: int, cfg: dict):
@@ -763,7 +833,9 @@ def _pref_sort_key(c: dict, pref_sort: Optional[str]):
     certainty（默认）＝最接近匹配原则：同档内门槛最贴近你位次的单元靠前
     （保档即「最好的保底」，冲档即「最现实的冲刺」），同距离时院校层次高者靠前；
     level＝院校层次优先（985>211>双一流），接近度为次键；
-    city＝城市分级优先（一线→五线），接近度为次键。"""
+    city＝城市分级优先（一线→五线），接近度为次键；
+    major＝专业优先：有专业实力记录（国家级/省级一流专业、第三方评级）的靠前，
+    无记录的殿后，接近度为次键。"""
     diff = c["rank_diff_last"] if c["rank_diff_last"] is not None else 1 << 30
     near = abs(diff)
     head = RISK_ORDER.index(c["risk"])
@@ -774,6 +846,9 @@ def _pref_sort_key(c: dict, pref_sort: Optional[str]):
         t = c.get("city_tier")
         tidx = CITY_TIER_ORDER.index(t) if t in CITY_TIER_ORDER else 99
         return (head, tidx, near)
+    if pref_sort == "major":
+        srank, trank = _major_strength_key(c)
+        return (head, srank, trank, near, tier)
     return (head, near, tier, diff)
 
 
@@ -965,10 +1040,14 @@ async def match(
     page = max(1, page)
     start = (page - 1) * page_size
     items = filtered[start:start + page_size]
-    # P1 区间模式：每条结果附乐观情景分档（主判定为悲观 hi）
+    # P1 区间模式：每条结果附乐观情景分档（主判定为悲观 hi）。
+    # 候选 dict 被管线缓存复用，不能就地改——用合并副本附加 risk_lo 键
     if interval:
-        for c in items:
-            c["risk_lo"], c["risk_reason_lo"] = _risk_at(c, interval["lo"], cfg)
+        items = [
+            {**c, **dict(zip(("risk_lo", "risk_reason_lo"),
+                             _risk_at(c, interval["lo"], cfg)))}
+            for c in items
+        ]
 
     # 聚合 facet（供前端下拉）
     # - 省/层次/性质/类型 基于全量候选（保持下拉稳定可选）

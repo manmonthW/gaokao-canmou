@@ -48,6 +48,7 @@ const PREF_TIPS: Record<string, string> = {
   certainty: '确定性优先（默认）：同一冲/稳/保档内，录取门槛最贴近你位次的单元排前面——保档即「不浪费分的最好保底」，冲档即「最现实的冲刺」；距离相同时层次高的学校靠前。',
   level: '院校层次优先：同一档内按 985 → 211 → 双一流 → 普通院校 排序，门槛接近度作为次级依据。适合看重学校牌子、保研与校招资源的考生。',
   city: '城市分级优先：同一档内按院校所在城市 一线/新一线 → 二线 → … → 五线 排序，门槛接近度作为次级依据。适合看重就业地域与城市资源的考生。',
+  major: '专业优先：同一档内有专业实力记录的排前面——国家级一流专业建设点 > 省级一流专业 > 第三方评级（如 A+/A/B+），门槛接近度作为次级依据。适合专业方向明确、看重专业实力的考生。',
 }
 
 // 风险档（决定 5 个 Tab 与默认展示顺序）：冲 → 稳 → 保 → 高波动 → 数据不足
@@ -429,6 +430,9 @@ onMounted(async () => {
         </el-tooltip>
         <el-tooltip :content="PREF_TIPS.city" placement="top" popper-class="wb-tip">
           <el-radio-button value="city">城市分级优先</el-radio-button>
+        </el-tooltip>
+        <el-tooltip :content="PREF_TIPS.major" placement="top" popper-class="wb-tip">
+          <el-radio-button value="major">专业优先</el-radio-button>
         </el-tooltip>
       </el-radio-group>
       <el-checkbox v-model="profile.tuition_cap" @change="runMatch(true)">
