@@ -48,7 +48,11 @@ ITEM_KEYS_PRE = ["school_code", "school_name", "major_code", "major_name",
                  "warning", "yearly"]
 # 本次 commit 允许的 match item 新键（is_985/is_211 为 commit 声明的
 # 「匹配页 985/211 标签」；strength 两键必须位于末尾）
-ITEM_NEW_KEYS = {"is_985", "is_211", "strength_tags", "major_strength"}
+# 新键按加入顺序排列，必须连续出现在 item 对象末尾；新增一律往后追加，不得插队。
+ITEM_NEW_ORDER = ["is_985", "is_211", "strength_tags", "major_strength",
+                  # migration 0017 专业冷热趋势
+                  "monotonic", "multi_unit_years", "major_trend"]
+ITEM_NEW_KEYS = set(ITEM_NEW_ORDER)
 
 
 def get_json(url):
@@ -68,7 +72,8 @@ def check_keys(label, actual, expected_old, new_keys):
 
 # ---------- 1. /meta：strength_dictionary ----------
 meta = get_json(BASE + "/meta")
-check_keys("meta", list(meta.keys()), META_KEYS, ["strength_dictionary"])
+check_keys("meta", list(meta.keys()), META_KEYS,
+           ["strength_dictionary", "trend_dictionary"])
 sd = meta["strength_dictionary"]
 assert len(sd) == 11, f"strength_dictionary 应 11 条，实际 {len(sd)}"
 rk = [r for r in sd if r["tag"].startswith("软科") or "ruanke" in str(r.get("source_note", ""))]
@@ -118,14 +123,15 @@ qs = urllib.parse.urlencode({
 t0 = time.perf_counter()
 match = get_json(BASE + "/match?" + qs)
 match_elapsed = time.perf_counter() - t0
-check_keys("match 顶层", list(match.keys()), MATCH_TOP_KEYS, [])
+check_keys("match 顶层", list(match.keys()), MATCH_TOP_KEYS,
+           ["market_drift"])   # 0017 新增，追加在末尾
 items = match["items"]
 assert items, "match 候选为空"
 for it in items:
     keys = list(it.keys())
-    # strength 两键必须位于对象末尾
-    assert keys[-2:] == ["strength_tags", "major_strength"], \
-        f"match item strength 新键未位于末尾: {keys}"
+    # 全部新键必须连续位于对象末尾（顺序 = ITEM_NEW_ORDER，新增一律往后追加）
+    assert keys[-len(ITEM_NEW_ORDER):] == ITEM_NEW_ORDER, \
+        f"match item 新键未按序位于末尾: {keys[-len(ITEM_NEW_ORDER):]}"
     # 既有键相对顺序不变（新键仅限声明集合）
     old_part = [k for k in keys if k not in ITEM_NEW_KEYS]
     assert old_part == ITEM_KEYS_PRE, \
@@ -135,7 +141,7 @@ for it in items:
     assert isinstance(it["strength_tags"], list)
     assert isinstance(it["major_strength"], list)
 print(f"  [契约] match item: 既有 {len(ITEM_KEYS_PRE)} 键相对顺序不变，"
-      f"新键 {sorted(ITEM_NEW_KEYS)}，strength 两键位于末尾 OK")
+      f"新键 {ITEM_NEW_ORDER} 依序位于末尾 OK")
 tagged = [it for it in items if it["strength_tags"]]
 ms_hit = [it for it in items if it["major_strength"]]
 assert tagged, "首页 50 条无一带 strength_tags，未命中带标签院校"

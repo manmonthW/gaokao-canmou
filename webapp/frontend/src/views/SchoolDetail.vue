@@ -138,6 +138,7 @@ watch(() => route.params.code, (c) => { code.value = c as string; load() })
                     effect="plain"
                     class="disc__tag"
                     :class="{ 'disc__tag--unofficial': !it.row.official }"
+                    tabindex="0"
                   >{{ it.def.label }}</el-tag>
                 </el-tooltip>
               </template>
@@ -209,7 +210,11 @@ watch(() => route.params.code, (c) => { code.value = c as string; load() })
             :key="m.major_name + (m.major_code || '')"
             class="majors__tag"
             effect="light"
+            role="button"
+            tabindex="0"
             @click="openMajor(m.major_name)"
+            @keydown.enter="openMajor(m.major_name)"
+            @keydown.space.prevent="openMajor(m.major_name)"
           >
             {{ m.major_name }} <span class="majors__dim">（{{ m.years }}年 · {{ m.records }}条）</span>
             <span v-if="m.flags?.length" class="majors__flag" :title="m.flags.join('、')">⚑ {{ m.flags.join('/') }}</span>
@@ -234,6 +239,7 @@ watch(() => route.params.code, (c) => { code.value = c as string; load() })
 .kv__v { font-size: var(--text-base); display: flex; align-items: center; gap: var(--space-2); }
 .majors { display: flex; flex-wrap: wrap; gap: var(--space-2); }
 .majors__tag { cursor: pointer; }
+.majors__tag:focus-visible { outline: 2px solid var(--color-primary); outline-offset: 2px; }
 .majors__dim { color: var(--color-text-muted); font-size: var(--text-xs); }
 .majors__flag { color: var(--el-color-warning); font-size: var(--text-xs); margin-left: 4px; }
 /* 学科实力明细（任务 #9） */
@@ -243,6 +249,7 @@ watch(() => route.params.code, (c) => { code.value = c as string; load() })
 .disc__evals { display: inline-flex; align-items: center; flex-wrap: wrap; gap: 2px; }
 .disc__sep { color: var(--color-text-muted); font-size: var(--text-sm); }
 .disc__tag { cursor: help; }
+.disc__tag:focus-visible { outline: 2px solid var(--color-primary); outline-offset: 2px; }
 .disc__tag--unofficial { border-style: dashed; }
 .hint { color: var(--color-text-muted); font-size: var(--text-xs); margin: var(--space-2) 0 0; }
 .intro { margin: var(--space-4) 0 0; padding: var(--space-3) var(--space-4); background: var(--color-bg-subtle, #f7f9fc); border-radius: var(--radius-md); font-size: var(--text-sm); line-height: 1.8; color: var(--color-text-secondary); }

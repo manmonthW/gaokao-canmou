@@ -4,6 +4,7 @@ import { ElMessage } from 'element-plus'
 import { api } from '@/api/client'
 import { useProfile, EXAMINEE_YEAR } from '@/composables/useProfile'
 import { usePlanner, toSnapshot, candidateId } from '@/composables/usePlanner'
+import { useIsMobile } from '@/composables/useBreakpoint'
 import type { MatchResponse, MatchCandidate, RiskLabel, SensitivityResponse } from '@/types'
 import DataStatusBanner from '@/components/DataStatusBanner.vue'
 import PlanBasket from '@/components/PlanBasket.vue'
@@ -11,9 +12,16 @@ import SchoolDrawer from '@/components/SchoolDrawer.vue'
 import MajorDrawer from '@/components/MajorDrawer.vue'
 import StepGuide from '@/components/StepGuide.vue'
 import StrengthBadges from '@/components/StrengthBadges.vue'
+import TrendBadge from '@/components/TrendBadge.vue'
+import TrendDetail from '@/components/TrendDetail.vue'
+import ThresholdCurve from '@/components/ThresholdCurve.vue'
 
 const { profile } = useProfile()
 const planner = usePlanner()
+// 移动端结果表收窄：层次/省份/位次细项列不渲染（不是靠 CSS 隐藏——el-table 的
+// <colgroup> 固定列宽，隐藏单元格不会真正收窄表格），改到展开行里查看，
+// 信息不丢失，只是收进「渐进展示」，符合 adapt.md「不要隐藏核心功能」
+const isMobile = useIsMobile()
 
 const meta = ref<any>(null)
 const data = ref<MatchResponse | null>(null)
@@ -52,12 +60,14 @@ const PREF_TIPS: Record<string, string> = {
 }
 
 // 风险档（决定 5 个 Tab 与默认展示顺序）：冲 → 稳 → 保 → 高波动 → 数据不足
+// type 直接对应 tokens.css 的风险色 slug（reach/match/safe/volatile/insufficient），
+// 不借用 Element Plus 的 success/primary/warning/danger/info——见 DESIGN.md「The Two Palettes Rule」
 const RISKS: { key: RiskLabel; label: string; type: string }[] = [
-  { key: '冲', label: '冲', type: 'warning' },
-  { key: '稳', label: '稳', type: 'primary' },
-  { key: '保', label: '保', type: 'success' },
-  { key: '高波动', label: '高波动', type: 'danger' },
-  { key: '数据不足', label: '数据不足', type: 'info' },
+  { key: '冲', label: '冲', type: 'reach' },
+  { key: '稳', label: '稳', type: 'match' },
+  { key: '保', label: '保', type: 'safe' },
+  { key: '高波动', label: '高波动', type: 'volatile' },
+  { key: '数据不足', label: '数据不足', type: 'insufficient' },
 ]
 const activeRisk = ref<RiskLabel>('冲')
 
@@ -192,7 +202,7 @@ function onPageChange() {
 }
 
 function riskType(r: RiskLabel) {
-  return RISKS.find((x) => x.key === r)?.type || 'info'
+  return RISKS.find((x) => x.key === r)?.type || 'insufficient'
 }
 function diffText(d: number | null) {
   if (d == null) return '—'
@@ -209,6 +219,8 @@ function diffClass(d: number | null) {
 
 // ---------- A2/A3：分档可信度说明 + 位次敏感度试算 ----------
 const noteOpen = ref<string[]>([])
+// 筛选栏收拢：常用（省份/专业关键词/两年均有）常驻，其余折叠进「更多筛选」
+const moreFiltersOpen = ref<string[]>([])
 const sens = ref<SensitivityResponse | null>(null)
 const sensLoading = ref(false)
 
@@ -609,38 +621,51 @@ onMounted(async () => {
         </div>
       </el-card>
 
-      <!-- 筛选器 -->
+      <!-- 筛选器：常用三项常驻，其余折叠进「更多筛选」（决策点 ≤4 原则） -->
       <el-card class="card" shadow="never">
         <div class="filters wrap">
-          <el-select v-model="filters.province" placeholder="省份" clearable class="f-sel" @change="onProvinceChange">
+          <el-select v-model="filters.province" placeholder="省份" aria-label="省份" clearable class="f-sel" @change="onProvinceChange">
             <el-option v-for="f in data.facets.province" :key="f.value" :label="`${f.value} (${f.count})`" :value="f.value" />
           </el-select>
-          <el-select v-model="filters.city" placeholder="城市" clearable class="f-sel" :disabled="!filters.province" @change="onFilterChange">
-            <el-option v-for="f in data.facets.city" :key="f.value" :label="`${f.value} (${f.count})`" :value="f.value" />
-          </el-select>
-          <el-select v-model="filters.level" placeholder="层次" clearable class="f-sel" @change="onFilterChange">
-            <el-option v-for="f in data.facets.level" :key="f.value" :label="`${f.value} (${f.count})`" :value="f.value" />
-          </el-select>
-          <el-select v-model="filters.nature" placeholder="性质" clearable class="f-sel" @change="onFilterChange">
-            <el-option v-for="f in data.facets.nature" :key="f.value" :label="`${f.value} (${f.count})`" :value="f.value" />
-          </el-select>
-          <el-select v-model="filters.type" placeholder="类型" clearable class="f-sel" @change="onFilterChange">
-            <el-option v-for="f in data.facets.type" :key="f.value" :label="`${f.value} (${f.count})`" :value="f.value" />
-          </el-select>
-          <el-input v-model="filters.major_keyword" placeholder="专业名关键词" clearable class="f-q" @keyup.enter="onFilterChange" @clear="onFilterChange" />
+          <el-input v-model="filters.major_keyword" placeholder="专业名关键词" aria-label="专业名关键词" clearable class="f-q" @keyup.enter="onFilterChange" @clear="onFilterChange" />
           <el-checkbox v-model="filters.has_both_years" @change="onFilterChange">仅两年均有数据</el-checkbox>
-          <el-checkbox-group v-model="filters.exclude_flags" class="flag-excl" @change="onFilterChange">
-            <el-tooltip
-              v-for="d in (meta?.major_flags || [])"
-              :key="d.flag"
-              :content="d.note || d.label"
-              placement="top"
-            >
-              <el-checkbox :value="d.flag">排除{{ d.label }}</el-checkbox>
-            </el-tooltip>
-          </el-checkbox-group>
           <span class="data-ver">数据版本：{{ data.data_version }}</span>
         </div>
+        <el-collapse v-model="moreFiltersOpen" class="note-collapse">
+          <el-collapse-item name="more">
+            <template #title>
+              <span class="sec__action">
+                <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 3H2l8 9.46V19l4 2v-8.54z"/></svg>
+                更多筛选（城市/层次/性质/类型/排除标记）
+                <svg class="sec__action-arrow" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>
+              </span>
+            </template>
+            <div class="filters wrap">
+              <el-select v-model="filters.city" placeholder="城市" aria-label="城市" clearable class="f-sel" :disabled="!filters.province" @change="onFilterChange">
+                <el-option v-for="f in data.facets.city" :key="f.value" :label="`${f.value} (${f.count})`" :value="f.value" />
+              </el-select>
+              <el-select v-model="filters.level" placeholder="层次" aria-label="层次" clearable class="f-sel" @change="onFilterChange">
+                <el-option v-for="f in data.facets.level" :key="f.value" :label="`${f.value} (${f.count})`" :value="f.value" />
+              </el-select>
+              <el-select v-model="filters.nature" placeholder="性质" aria-label="性质" clearable class="f-sel" @change="onFilterChange">
+                <el-option v-for="f in data.facets.nature" :key="f.value" :label="`${f.value} (${f.count})`" :value="f.value" />
+              </el-select>
+              <el-select v-model="filters.type" placeholder="类型" aria-label="类型" clearable class="f-sel" @change="onFilterChange">
+                <el-option v-for="f in data.facets.type" :key="f.value" :label="`${f.value} (${f.count})`" :value="f.value" />
+              </el-select>
+              <el-checkbox-group v-model="filters.exclude_flags" class="flag-excl" @change="onFilterChange">
+                <el-tooltip
+                  v-for="d in (meta?.major_flags || [])"
+                  :key="d.flag"
+                  :content="d.note || d.label"
+                  placement="top"
+                >
+                  <el-checkbox :value="d.flag">排除{{ d.label }}</el-checkbox>
+                </el-tooltip>
+              </el-checkbox-group>
+            </div>
+          </el-collapse-item>
+        </el-collapse>
       </el-card>
 
       <!-- 结果表 -->
@@ -651,12 +676,35 @@ onMounted(async () => {
         <el-table :data="data.items" size="small" border :row-key="rowKey" :expand-row-keys="Object.keys(expandedRows)" @expand-change="(r:any)=>{const k=rowKey(r); expandedRows[k]=!expandedRows[k]}" style="width:100%">
           <el-table-column type="expand" fixed="left">
             <template #default="{ row }">
+              <!-- 移动端：桌面端单独占列的层次/省份/位次细项，收进展开行（信息不丢失） -->
+              <div v-if="isMobile" class="yr">
+                <span class="yr__t">层次/性质/类型：</span>{{ row.level }} · {{ row.nature }} · {{ row.type }}
+                <span class="yr__m">｜{{ row.province }}{{ row.city ? '·' + row.city : '' }}</span>
+              </div>
+              <div v-if="isMobile" class="yr">
+                <span class="yr__t">最难年 / 最近年位次：</span>
+                <span class="tnum">{{ row.best_rank?.toLocaleString() }} / {{ row.last_year_rank?.toLocaleString() ?? '—' }}</span>
+              </div>
+              <div v-if="isMobile" class="yr">
+                <span class="yr__t">最好/最差/中位：</span>
+                <span class="tnum">{{ row.best_rank.toLocaleString() }}</span> /
+                <span class="tnum">{{ row.worst_rank.toLocaleString() }}</span> /
+                <span class="tnum">{{ row.median_rank.toLocaleString() }}</span>
+                <span class="yr__m">（跨度 <span class="tnum">{{ row.span.toLocaleString() }}</span>）</span>
+              </div>
               <div class="yr">
                 <span class="yr__t">历年最低位次：</span>
                 <span v-for="y in row.yearly" :key="y.year" class="yr__item">
                   {{ y.year }}：<b class="tnum">{{ y.lowest_rank.toLocaleString() }}</b>
                 </span>
                 <span class="yr__m">（覆盖 {{ row.n_years }} 年）</span>
+              </div>
+              <div v-if="row.multi_unit_years && Object.keys(row.multi_unit_years).length" class="yr">
+                <span class="yr__t">同名多单元：</span>
+                <span class="yr__m">
+                  <template v-for="(n, y) in row.multi_unit_years" :key="y">{{ y }} 年 {{ n }} 个（含定向等）　</template>
+                  该年门槛取这些单元的中位数
+                </span>
               </div>
               <div v-if="row.safe_line" class="yr">
                 <span class="yr__t">保档安全边际线：</span>
@@ -665,18 +713,31 @@ onMounted(async () => {
                   （最难年门槛 × {{ data?.classification_note?.safe_margin ?? 0.85 }}；位次优于此线才判「保」）
                 </span>
               </div>
+              <div v-if="(row.yearly || []).length >= 2" class="yr yr--curve">
+                <span class="yr__t">历年门槛走势：</span>
+                <ThresholdCurve
+                  :yearly="row.yearly"
+                  :market-drift="data?.market_drift"
+                  :examinee-rank="data?.examinee?.rank ?? null"
+                />
+              </div>
+              <div v-if="row.major_trend && row.major_trend.label !== '样本不足'" class="yr yr--trend">
+                <span class="yr__t">该专业近三年：</span>
+                <TrendBadge :trend="row.major_trend" :dictionary="meta?.trend_dictionary" :badge-only="false" />
+                <TrendDetail :trend="row.major_trend" compact />
+              </div>
             </template>
           </el-table-column>
           <el-table-column prop="school_name" label="院校" min-width="170" show-overflow-tooltip fixed="left">
             <template #default="{ row }">
-              <a class="school-link" @click.stop="openSchool(row.school_code)">{{ row.school_name }}</a>
+              <button type="button" class="school-link" @click.stop="openSchool(row.school_code)">{{ row.school_name }}</button>
               <el-tag v-if="row.is_985" size="small" effect="plain" type="danger" class="flag-tag">985</el-tag>
               <el-tag v-if="row.is_211" size="small" effect="plain" type="primary" class="flag-tag">211</el-tag>
             </template>
           </el-table-column>
           <el-table-column prop="major_name" label="专业" min-width="170" show-overflow-tooltip fixed="left">
             <template #default="{ row }">
-              <a v-if="row.catalog_name" class="major-link" @click.stop="openMajor(row.catalog_name)">{{ row.major_name }}</a>
+              <button v-if="row.catalog_name" type="button" class="major-link" @click.stop="openMajor(row.catalog_name)">{{ row.major_name }}</button>
               <span v-else>{{ row.major_name }}</span>
               <el-tooltip
                 v-for="f in (row.flags || [])"
@@ -698,28 +759,28 @@ onMounted(async () => {
               />
             </template>
           </el-table-column>
-          <el-table-column label="层次/性质/类型" min-width="150">
+          <el-table-column v-if="!isMobile" label="层次/性质/类型" min-width="150">
             <template #default="{ row }">
               <span class="tag">{{ row.level }}</span>
               <span class="tag">{{ row.nature }}</span>
               <span class="tag">{{ row.type }}</span>
             </template>
           </el-table-column>
-          <el-table-column label="省份/城市" min-width="120">
+          <el-table-column v-if="!isMobile" label="省份/城市" min-width="120">
             <template #default="{ row }">{{ row.province }}{{ row.city ? '·' + row.city : '' }}</template>
           </el-table-column>
-          <el-table-column label="最难年 / 最近年位次" width="150" align="right">
+          <el-table-column v-if="!isMobile" label="最难年 / 最近年位次" width="150" align="right">
             <template #header>
               <el-tooltip :content="`最难年＝历史最难一年的门槛位次（冲/稳/保的分档基准，保守口径）；最近年＝${meta?.last_year ?? ''} 年门槛。两者差距大＝门槛断崖变易，分档从严按最难年。`" placement="top">
-                <span class="th-help">最难年 / 最近年位次</span>
+                <span class="th-help" tabindex="0">最难年 / 最近年位次</span>
               </el-tooltip>
             </template>
             <template #default="{ row }"><span class="tnum">{{ row.best_rank?.toLocaleString() }} / {{ row.last_year_rank?.toLocaleString() ?? '—' }}</span></template>
           </el-table-column>
-          <el-table-column label="最好/最差/中位" align="right" min-width="170">
+          <el-table-column v-if="!isMobile" label="最好/最差/中位" align="right" min-width="170">
             <template #header>
               <el-tooltip content="历年门槛位次：最好 = 历史最小位次（最难的一年）；最差 = 最大位次（最易的一年）；中位 = 中间值。跨度大说明门槛不稳定。" placement="top">
-                <span class="th-help">最好/最差/中位</span>
+                <span class="th-help" tabindex="0">最好/最差/中位</span>
               </el-tooltip>
             </template>
             <template #default="{ row }">
@@ -728,7 +789,7 @@ onMounted(async () => {
               <span class="tnum">{{ row.median_rank.toLocaleString() }}</span>
             </template>
           </el-table-column>
-          <el-table-column label="跨度" width="90" align="right">
+          <el-table-column v-if="!isMobile" label="跨度" width="90" align="right">
             <template #default="{ row }"><span class="tnum">{{ row.span.toLocaleString() }}</span></template>
           </el-table-column>
           <el-table-column label="本人位次差" width="130" align="center">
@@ -738,7 +799,8 @@ onMounted(async () => {
           </el-table-column>
           <el-table-column label="依据" min-width="240" show-overflow-tooltip>
             <template #default="{ row }">
-              <span :class="['risk-dot','risk-dot--' + riskType(row.risk)]"></span>
+              <span :class="['risk-tag', 'risk-tag--' + riskType(row.risk)]">{{ row.risk }}</span>
+              <TrendBadge :trend="row.major_trend" :dictionary="meta?.trend_dictionary" compact />
               <el-tag v-if="row.risk === '保' && row.safe_band" size="small" effect="plain"
                 :type="row.safe_band === '标准保底' ? 'success' : row.safe_band === '极稳垫底' ? 'info' : 'warning'">{{ row.safe_band }}</el-tag>
               <el-tag v-if="row.over_reach" size="small" type="danger" effect="plain">超冲</el-tag>
@@ -762,9 +824,9 @@ onMounted(async () => {
                 content="若你的位次落在估计区间的乐观一端（下界），该单元会判为此档"
                 placement="top"
               >
-                <el-tag :type="riskType(row.risk_lo)" size="small" effect="plain" class="flag-tag">乐观 {{ row.risk_lo }}</el-tag>
+                <span :class="['risk-tag', 'risk-tag--' + riskType(row.risk_lo), 'flag-tag']">乐观 {{ row.risk_lo }}</span>
               </el-tooltip>
-              <el-tag v-if="row.warning" type="warning" size="small" effect="plain">数据不足</el-tag>
+              <span v-if="row.warning" class="risk-tag risk-tag--insufficient">数据不足</span>
             </template>
           </el-table-column>
           <el-table-column label="操作" width="170" align="center" fixed="right">
@@ -808,7 +870,7 @@ onMounted(async () => {
       </template>
       <p class="dlg-hint">或新建方案：</p>
       <div class="plan-new">
-        <el-input v-model="newPlanName" placeholder="方案名，如「主方案」" style="width: 240px" @keyup.enter="createPlanAndAdd" />
+        <el-input v-model="newPlanName" placeholder="方案名，如「主方案」" aria-label="方案名" style="width: 240px" @keyup.enter="createPlanAndAdd" />
         <el-button type="primary" @click="createPlanAndAdd">新建并加入</el-button>
       </div>
     </el-dialog>
@@ -878,10 +940,12 @@ onMounted(async () => {
 }
 .pref-bar__hint { font-size: var(--text-xs); color: var(--color-text-muted); margin-left: auto; }
 
-.school-link { color: var(--color-primary); cursor: pointer; }
-.school-link:hover { text-decoration: underline; }
-.major-link { color: var(--color-primary); cursor: pointer; }
-.major-link:hover { text-decoration: underline; }
+.school-link, .major-link {
+  background: none; border: none; padding: 0; margin: 0;
+  font: inherit; color: var(--color-primary); cursor: pointer;
+}
+.school-link:hover, .major-link:hover { text-decoration: underline; }
+.school-link:focus-visible, .major-link:focus-visible { outline: 2px solid var(--color-primary); outline-offset: 2px; }
 
 .chip__hint { font-size: var(--text-xs); color: var(--color-text-muted); }
 .risk-chips { display: flex; flex-wrap: wrap; gap: var(--space-3); margin-bottom: var(--space-4); }
@@ -897,11 +961,12 @@ onMounted(async () => {
 }
 .chip__num { font-weight: 700; font-variant-numeric: tabular-nums; }
 .chip--active { box-shadow: 0 0 0 2px var(--color-primary); }
-.chip--success.chip--active { border-color: var(--el-color-success); box-shadow: 0 0 0 2px var(--el-color-success); }
-.chip--primary.chip--active { border-color: var(--el-color-primary); box-shadow: 0 0 0 2px var(--el-color-primary); }
-.chip--warning.chip--active { border-color: var(--el-color-warning); box-shadow: 0 0 0 2px var(--el-color-warning); }
-.chip--danger.chip--active { border-color: var(--el-color-danger); box-shadow: 0 0 0 2px var(--el-color-danger); }
-.chip--info.chip--active { border-color: var(--el-color-info); box-shadow: 0 0 0 2px var(--el-color-info); }
+/* 风险分类五色，与 DESIGN.md「The Two Palettes Rule」保持一致，不借用 Element Plus 语义色 */
+.chip--reach.chip--active { border-color: var(--color-reach); box-shadow: 0 0 0 2px var(--color-reach); }
+.chip--match.chip--active { border-color: var(--color-match); box-shadow: 0 0 0 2px var(--color-match); }
+.chip--safe.chip--active { border-color: var(--color-safe); box-shadow: 0 0 0 2px var(--color-safe); }
+.chip--volatile.chip--active { border-color: var(--color-volatile); box-shadow: 0 0 0 2px var(--color-volatile); }
+.chip--insufficient.chip--active { border-color: var(--color-insufficient); box-shadow: 0 0 0 2px var(--color-insufficient); }
 .filters { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-3); }
 .filters.wrap { row-gap: var(--space-3); }
 .f-sel { width: 150px; }
@@ -914,12 +979,6 @@ onMounted(async () => {
 .diff--ahead { color: var(--el-color-success); }
 .diff--behind { color: var(--el-color-danger); }
 .diff--flat { color: var(--color-text-muted); }
-.risk-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; vertical-align: middle; }
-.risk-dot--success { background: var(--el-color-success); }
-.risk-dot--primary { background: var(--el-color-primary); }
-.risk-dot--warning { background: var(--el-color-warning); }
-.risk-dot--danger { background: var(--el-color-danger); }
-.risk-dot--info { background: var(--el-color-info); }
 .pg { display: flex; justify-content: flex-end; margin-top: var(--space-3); }
 .ctx-alert { line-height: 1.7; }
 .subj-note { margin: 0 0 var(--space-3); font-size: var(--text-sm); color: var(--color-text-secondary); }
@@ -963,6 +1022,7 @@ onMounted(async () => {
 .sens-legend { margin: 0 0 var(--space-2); }
 .sens-explain { margin-top: var(--space-2); }
 .th-help { cursor: help; border-bottom: 1px dotted currentColor; }
+.th-help:focus-visible { outline: 2px solid var(--color-primary); outline-offset: 2px; }
 .sens-cur { font-weight: 700; color: var(--color-primary); }
 .flag-excl { display: inline-flex; flex-wrap: wrap; gap: var(--space-2); }
 .flag-tag { margin-left: 4px; cursor: help; }
@@ -971,4 +1031,28 @@ onMounted(async () => {
 .plan-list { display: flex; flex-wrap: wrap; gap: var(--space-2); }
 .plan-btn__n { color: var(--color-text-muted); font-size: var(--text-xs); }
 .plan-new { display: flex; gap: var(--space-2); }
+
+/* 移动端优先（PRODUCT.md 硬要求）：筛选栏改单列堆叠，行内操作按钮加大触控热区 */
+/* 展开行里的曲线与趋势块独占整行；标题另起一行，避免与内容挤在一起 */
+.yr--curve,
+.yr--trend { display: block; margin-top: var(--space-3); }
+.yr--curve .yr__t,
+.yr--trend .yr__t { display: block; margin-bottom: 4px; }
+.yr--curve :deep(.tc) { max-width: 520px; }
+.yr--trend :deep(.td) { margin-top: 6px; }
+
+@media (max-width: 640px) {
+  .filters { flex-direction: column; align-items: stretch; }
+  .f-sel, .f-q { width: 100%; }
+  .profile-bar, .pref-bar { flex-direction: column; align-items: flex-start; }
+  .risk-chips { gap: var(--space-2); }
+  .chip { flex: 1 1 calc(50% - var(--space-2)); justify-content: center; }
+  :deep(.el-table .cell .el-button + .el-button) { margin-left: var(--space-2); }
+}
+/* 触控输入设备（不只是窄屏——触屏平板在宽视口下也要有效热区），按 adapt.md
+   「按输入方式而非仅按屏幕宽度判断」的建议用 pointer:coarse 检测 */
+@media (max-width: 640px), (pointer: coarse) {
+  :deep(.el-table .cell .el-button) { min-height: 44px; padding: 8px 12px; }
+  .chip { min-height: 44px; }
+}
 </style>

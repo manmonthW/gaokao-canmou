@@ -4,6 +4,7 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { api } from '@/api/client'
 import { useProfile } from '@/composables/useProfile'
 import { usePlanner, STRATEGY_BASELINES, toSnapshot, candidateId } from '@/composables/usePlanner'
+import { useIsMobile } from '@/composables/useBreakpoint'
 import type { CandidateSnapshot, PlanEntry, PlanStrategy, RiskLabel, VolunteerPlan } from '@/types'
 import DataStatusBanner from '@/components/DataStatusBanner.vue'
 import StepGuide from '@/components/StepGuide.vue'
@@ -11,6 +12,8 @@ import StepGuide from '@/components/StepGuide.vue'
 const { profile } = useProfile()
 const planner = usePlanner()
 const { favorites, compareIds, plans } = planner
+// 移动端表格收窄：低优先级列（收藏时间/序号/城市）不渲染，见 Match.vue 同名注释
+const isMobile = useIsMobile()
 
 const activeTab = ref<'fav' | 'compare' | 'plans'>('plans')
 
@@ -20,17 +23,32 @@ onMounted(async () => {
   meta.value = await api.meta().catch(() => null)
 })
 
-const RISK_TYPE: Record<RiskLabel, string> = {
-  保: 'success', 稳: 'primary', 冲: 'warning', 高波动: 'danger', 数据不足: 'info',
+// 风险 slug，直接对应 tokens.css 的五个风险 token（不借用 Element Plus 的
+// success/primary/warning/danger/info）——见 DESIGN.md「The Two Palettes Rule」
+const RISK_KEY: Record<RiskLabel, string> = {
+  保: 'safe', 稳: 'match', 冲: 'reach', 高波动: 'volatile', 数据不足: 'insufficient',
 }
 // P2a 覆盖曲线点位配色（与体检配比条同色系）
 const RISK_COLOR: Record<RiskLabel, string> = {
-  保: 'var(--color-match)', 稳: 'var(--color-safe)', 冲: 'var(--color-reach)',
+  保: 'var(--color-safe)', 稳: 'var(--color-match)', 冲: 'var(--color-reach)',
   高波动: 'var(--color-volatile)', 数据不足: 'var(--color-insufficient)',
+}
+// 曲线图色觉友好：五档除颜色外再叠加形状区分（圆/方/三角/菱形/空心圆），
+// 不要求 hover 才能分辨——见 PRODUCT.md「色觉友好」硬性要求
+function triangleUp(cx: number, cy: number, s = 5.5): string {
+  return `${cx},${cy - s} ${cx + s},${cy + s * 0.85} ${cx - s},${cy + s * 0.85}`
+}
+function diamondPts(cx: number, cy: number, s = 5.5): string {
+  return `${cx},${cy - s} ${cx + s},${cy} ${cx},${cy + s} ${cx - s},${cy}`
+}
+function legendDotStyle(r: RiskLabel) {
+  return RISK_KEY[r] === 'insufficient'
+    ? { borderColor: RISK_COLOR[r] }
+    : { background: RISK_COLOR[r] }
 }
 
 // ---------- 面向普通用户的悬浮说明（覆盖曲线画图逻辑 / 策略基线） ----------
-const CURVE_TIP = '这张图怎么画：① 每个点＝一个志愿，点的高度＝该院校+专业「历史最难年」的投档门槛位次（历年数据里录取最难的一年，取保守口径）；② 虚线＝你的位次：线上方＝最难年门槛也比你好，属冲击区；紧贴线下方＝稳档区（最可能录取）；远低于线＝保底区；③ 点的颜色是最终档位判定（还会综合考虑波动、数据完整度等），高度只是判定依据之一，所以个别「稳」的点略高于线是正常的（最难年够不着、但历史中位够得着）；④ 健康的志愿表曲线应按 冲→稳→保 单调下沉，尾部全是保档；⑤ 年份切换只改纵轴口径（看「如果只信这一年，每个志愿站在哪」），不改变分档——分档仍以最难年+安全边际为准。'
+const CURVE_TIP = '这张图怎么画：① 每个点＝一个志愿，点的高度＝该院校+专业「历史最难年」的投档门槛位次（历年数据里录取最难的一年，取保守口径）；② 虚线＝你的位次：线上方＝最难年门槛也比你好，属冲击区；紧贴线下方＝稳档区（最可能录取）；远低于线＝保底区；③ 点的颜色和形状（圆=稳、方=保、三角=冲、菱形=高波动、虚线空心圆=数据不足）共同表示最终档位判定（还会综合考虑波动、数据完整度等），高度只是判定依据之一，所以个别「稳」的点略高于线是正常的（最难年够不着、但历史中位够得着）；④ 健康的志愿表曲线应按 冲→稳→保 单调下沉，尾部全是保档；⑤ 年份切换只改纵轴口径（看「如果只信这一年，每个志愿站在哪」），不改变分档——分档仍以最难年+安全边际为准。'
 const STRATEGY_TIPS: Record<PlanStrategy, string> = {
   冲击: '冲击型：冲约36% / 稳29% / 保35%。愿意用更多冲刺槽位博更好学校，但保底安全垫不缩水；适合能接受「用滑到更低一档的可能、换更好学校机会」的考生。',
   均衡: '均衡型：冲20% / 稳50% / 保30%。稳档占一半作主体，兼顾「博好学校」和「不滑档」，是最常见的建议比例。',
@@ -321,6 +339,8 @@ function addFavToPlan(snapId: string) {
 
 // ---------- P2c 梯度模板：从收藏池按所选策略基线（冲/稳/保）一键生成骨架 ----------
 const tplStrategy = ref<PlanStrategy>('均衡')
+// 工具栏收拢：选方案 + 导出（主操作）常驻，其余折叠进「更多操作」（决策点 ≤4 原则）
+const planMoreOpen = ref<string[]>([])
 function generateTemplate() {
   const pool = favorites.value
   if (pool.length < 3) {
@@ -483,13 +503,16 @@ async function exportPlan(p: VolunteerPlan) {
           <div
             v-if="analysis.counts[r]"
             class="ratio__seg"
-            :class="'ratio__seg--' + RISK_TYPE[r]"
+            :class="'ratio__seg--' + RISK_KEY[r]"
             :style="{ flexGrow: analysis.counts[r] }"
             :title="`${r} ${analysis.counts[r]}`"
           >{{ r }}{{ analysis.counts[r] }}</div>
         </template>
       </div>
 
+      <ul v-if="analysis.notes?.length" class="checkup__list checkup__list--note">
+        <li v-for="(n, i) in analysis.notes" :key="'n' + i">{{ n }}</li>
+      </ul>
       <ul class="checkup__list" :class="{ 'checkup__list--ok': analysis.ok }">
         <li v-for="(w, i) in analysis.warnings" :key="i">{{ w }}</li>
       </ul>
@@ -509,11 +532,11 @@ async function exportPlan(p: VolunteerPlan) {
           <el-empty v-if="!favFiltered.length" description="暂无收藏。到「智能匹配」结果里点 ☆ 收藏候选。" />
           <el-table v-else :data="favFiltered" size="small" border>
             <el-table-column label="档位" width="90" align="center">
-              <template #default="{ row }"><el-tag :type="RISK_TYPE[row.risk as RiskLabel] as any" size="small">{{ row.risk }}</el-tag></template>
+              <template #default="{ row }"><span :class="['risk-tag', 'risk-tag--' + RISK_KEY[row.risk as RiskLabel]]">{{ row.risk }}</span></template>
             </el-table-column>
             <el-table-column prop="school_name" label="院校" min-width="160" show-overflow-tooltip />
             <el-table-column prop="major_name" label="专业" min-width="160" show-overflow-tooltip />
-            <el-table-column label="城市" width="110">
+            <el-table-column v-if="!isMobile" label="城市" width="110">
               <template #default="{ row }">{{ row.province }}{{ row.city ? '·' + row.city : '' }}</template>
             </el-table-column>
             <el-table-column :label="`近年最低位次${meta?.last_year ? '（' + meta.last_year + '）' : ''}`" width="130" align="right">
@@ -522,7 +545,7 @@ async function exportPlan(p: VolunteerPlan) {
             <el-table-column label="位次差" width="110" align="center">
               <template #default="{ row }">{{ diffText(row.rank_diff_last) }}</template>
             </el-table-column>
-            <el-table-column prop="saved_at" label="收藏时间" width="160" />
+            <el-table-column v-if="!isMobile" prop="saved_at" label="收藏时间" width="160" />
             <el-table-column label="操作" width="190" align="center" fixed="right">
               <template #default="{ row }">
                 <el-button link size="small" :type="planner.inCompare(row.id) ? 'primary' : 'default'" @click="onToggleCompare(row)">对比</el-button>
@@ -559,7 +582,7 @@ async function exportPlan(p: VolunteerPlan) {
                   <tr v-for="r in compareRows" :key="r.label">
                     <td class="cmp__attr">{{ r.label }}</td>
                     <td v-for="c in compareList" :key="c.id" :class="{ 'cmp__risk': r.label === '风险档' }">
-                      <el-tag v-if="r.label === '风险档'" :type="RISK_TYPE[c.risk] as any" size="small">{{ c.risk }}</el-tag>
+                      <span v-if="r.label === '风险档'" :class="['risk-tag', 'risk-tag--' + RISK_KEY[c.risk]]">{{ c.risk }}</span>
                       <template v-else>{{ r.get(c) }}</template>
                     </td>
                   </tr>
@@ -574,30 +597,43 @@ async function exportPlan(p: VolunteerPlan) {
       <el-tab-pane :label="`我的方案（${plans.length}）`" name="plans">
         <el-card class="card" shadow="never">
           <div class="toolbar">
-            <el-select v-model="activePlanId" placeholder="选择方案" style="width: 220px">
+            <el-select v-model="activePlanId" placeholder="选择方案" aria-label="选择方案" style="width: 220px">
               <el-option v-for="p in plans" :key="p.id" :label="`${p.name}（${p.entries.length}）`" :value="p.id" />
             </el-select>
-            <el-input v-model="newPlanName" placeholder="新方案名" style="width: 180px" @keyup.enter="createPlan" />
-            <el-button @click="createPlan">新建方案</el-button>
-            <el-tooltip content="一键梯度模板按此策略基线决定冲/稳/保配比；各型含义见下方「策略基线」悬浮说明" placement="top" popper-class="wb-tip">
-              <el-select v-model="tplStrategy" size="small" style="width: 104px">
-                <el-option value="冲击" label="冲击型" />
-                <el-option value="均衡" label="均衡型" />
-                <el-option value="稳妥" label="稳妥型" />
-              </el-select>
-            </el-tooltip>
-            <el-tooltip content="从收藏池按所选策略基线（冲/稳/保配比）一键生成骨架方案（教学性模板，需自行补全至 112 个）" placement="top">
-              <el-button type="success" plain @click="generateTemplate">一键梯度模板</el-button>
-            </el-tooltip>
-            <template v-if="activePlan">
-              <el-button type="warning" plain @click="planner.sortPlanByGradient(activePlan.id)">按冲→稳→保重排</el-button>
-              <el-button type="primary" :loading="exporting" @click="exportPlan(activePlan)">导出志愿表 xlsx</el-button>
-              <el-button type="danger" plain @click="deletePlan(activePlan)">删除方案</el-button>
-              <el-tooltip content="录取结束后自愿回填「实际被第几志愿录取」；匿名可用，仅用于校准分档规则" placement="top">
-                <el-button type="info" plain @click="openFeedback">回填录取结果</el-button>
-              </el-tooltip>
-            </template>
+            <el-button v-if="activePlan" type="primary" :loading="exporting" @click="exportPlan(activePlan)">导出志愿表 xlsx</el-button>
           </div>
+          <el-collapse v-model="planMoreOpen" class="note-collapse">
+            <el-collapse-item name="more">
+              <template #title>
+                <span class="sec__action">
+                  <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/><circle cx="5" cy="12" r="1"/></svg>
+                  更多操作（新建/梯度模板/重排/删除/回填结果）
+                  <svg class="sec__action-arrow" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>
+                </span>
+              </template>
+              <div class="toolbar">
+                <el-input v-model="newPlanName" placeholder="新方案名" aria-label="新方案名" style="width: 180px" @keyup.enter="createPlan" />
+                <el-button @click="createPlan">新建方案</el-button>
+                <el-tooltip content="一键梯度模板按此策略基线决定冲/稳/保配比；各型含义见下方「策略基线」悬浮说明" placement="top" popper-class="wb-tip">
+                  <el-select v-model="tplStrategy" size="small" style="width: 104px">
+                    <el-option value="冲击" label="冲击型" />
+                    <el-option value="均衡" label="均衡型" />
+                    <el-option value="稳妥" label="稳妥型" />
+                  </el-select>
+                </el-tooltip>
+                <el-tooltip content="从收藏池按所选策略基线（冲/稳/保配比）一键生成骨架方案（教学性模板，需自行补全至 112 个）" placement="top">
+                  <el-button type="success" plain @click="generateTemplate">一键梯度模板</el-button>
+                </el-tooltip>
+                <template v-if="activePlan">
+                  <el-button type="warning" plain @click="planner.sortPlanByGradient(activePlan.id)">按冲→稳→保重排</el-button>
+                  <el-tooltip content="录取结束后自愿回填「实际被第几志愿录取」；匿名可用，仅用于校准分档规则" placement="top">
+                    <el-button type="info" plain @click="openFeedback">回填录取结果</el-button>
+                  </el-tooltip>
+                  <el-button type="danger" plain @click="deletePlan(activePlan)">删除方案</el-button>
+                </template>
+              </div>
+            </el-collapse-item>
+          </el-collapse>
 
           <template v-if="activePlan">
             <div class="plan-meta">
@@ -607,7 +643,7 @@ async function exportPlan(p: VolunteerPlan) {
             </div>
             <div class="plan-meta">
               <el-tooltip content="三个数字是「冲/稳/保」建议占比：任何类型保底都恒定在 35% 左右（防滑档安全垫），只有冲的比例随风险偏好变化。该基线用于方案体检配比校验与一键梯度模板。" placement="top" popper-class="wb-tip">
-                <span class="help-q">策略基线？</span>
+                <span class="help-q" tabindex="0">策略基线？</span>
               </el-tooltip>
               <el-radio-group v-model="planStrategy" size="small">
                 <el-tooltip :content="STRATEGY_TIPS['冲击']" placement="top" popper-class="wb-tip">
@@ -639,7 +675,7 @@ async function exportPlan(p: VolunteerPlan) {
                 <div class="card__head card__head--curve">
                   <span class="curve-title">整表覆盖曲线
                     <el-tooltip :content="CURVE_TIP" placement="top" popper-class="wb-tip">
-                      <span class="help-q">这图怎么画？</span>
+                      <span class="help-q" tabindex="0">这图怎么画？</span>
                     </el-tooltip></span>
                   <el-radio-group v-model="curveYear" size="small" class="curve-mode">
                     <el-radio-button value="hardest">最难年</el-radio-button>
@@ -649,7 +685,8 @@ async function exportPlan(p: VolunteerPlan) {
                   <span class="muted">{{ curveHeadNote }}</span>
                 </div>
               </template>
-              <svg v-if="curve" :viewBox="`0 0 ${curve.W} ${curve.H}`" class="curve" role="img" aria-label="志愿表覆盖曲线">
+              <div v-if="curve" class="curve-scroll">
+              <svg :viewBox="`0 0 ${curve.W} ${curve.H}`" class="curve" role="img" aria-label="志愿表覆盖曲线">
                 <defs>
                   <linearGradient id="curveArea" x1="0" y1="0" x2="0" y2="1">
                     <stop offset="0%" stop-color="var(--color-primary)" stop-opacity="0.20" />
@@ -694,16 +731,39 @@ async function exportPlan(p: VolunteerPlan) {
                   <line :x1="curve.padL" :x2="curve.right" :y1="curve.exLoY" :y2="curve.exLoY" class="curve__me curve__me--lo" />
                   <text :x="curve.right - 2" :y="+curve.exLoY - 5" text-anchor="end" class="curve__me-label curve__me-label--lo">下界 {{ (curve.exLo as number).toLocaleString() }}</text>
                 </template>
-                <!-- 门槛位次点：按档位着色，悬停放大 -->
-                <circle
-                  v-for="(c, i) in curve.circles"
-                  :key="'c' + i"
-                  :cx="c.cx" :cy="c.cy" r="4.5"
-                  :fill="RISK_COLOR[c.risk]"
-                  :class="['curve__dot', c.over && 'curve__dot--over', c.far && 'curve__dot--far']"
-                >
-                  <title>{{ c.label }}</title>
-                </circle>
+                <!-- 门槛位次点：颜色+形状双重区分档位（色觉友好），悬停放大 -->
+                <template v-for="(c, i) in curve.circles" :key="'c' + i">
+                  <circle
+                    v-if="RISK_KEY[c.risk] === 'match'"
+                    :cx="c.cx" :cy="c.cy" r="4.5"
+                    :fill="RISK_COLOR[c.risk]"
+                    :class="['curve__dot', c.over && 'curve__dot--over', c.far && 'curve__dot--far']"
+                  ><title>{{ c.label }}</title></circle>
+                  <rect
+                    v-else-if="RISK_KEY[c.risk] === 'safe'"
+                    :x="c.cx - 4.2" :y="c.cy - 4.2" width="8.4" height="8.4"
+                    :fill="RISK_COLOR[c.risk]"
+                    :class="['curve__dot', c.over && 'curve__dot--over', c.far && 'curve__dot--far']"
+                  ><title>{{ c.label }}</title></rect>
+                  <polygon
+                    v-else-if="RISK_KEY[c.risk] === 'reach'"
+                    :points="triangleUp(c.cx, c.cy)"
+                    :fill="RISK_COLOR[c.risk]"
+                    :class="['curve__dot', c.over && 'curve__dot--over', c.far && 'curve__dot--far']"
+                  ><title>{{ c.label }}</title></polygon>
+                  <polygon
+                    v-else-if="RISK_KEY[c.risk] === 'volatile'"
+                    :points="diamondPts(c.cx, c.cy)"
+                    :fill="RISK_COLOR[c.risk]"
+                    :class="['curve__dot', c.over && 'curve__dot--over', c.far && 'curve__dot--far']"
+                  ><title>{{ c.label }}</title></polygon>
+                  <circle
+                    v-else
+                    :cx="c.cx" :cy="c.cy" r="4.5"
+                    fill="#fff" :stroke="RISK_COLOR[c.risk]" stroke-width="1.5" stroke-dasharray="2 2"
+                    :class="['curve__dot', 'curve__dot--insufficient', c.over && 'curve__dot--over', c.far && 'curve__dot--far']"
+                  ><title>{{ c.label }}</title></circle>
+                </template>
                 <!-- 分年视图：当年无数据的志愿在底部画空心点 -->
                 <circle
                   v-for="(g, i) in curve.gaps"
@@ -718,10 +778,11 @@ async function exportPlan(p: VolunteerPlan) {
                 <text v-for="t in curve.xTicks" :key="'x' + t.label" :x="t.x" :y="curve.bottom + 15" text-anchor="middle" class="curve__tick">{{ t.label }}</text>
                 <text :x="(curve.W + curve.padL) / 2" :y="curve.H - 4" text-anchor="middle" class="curve__tick">志愿序号 →</text>
               </svg>
+              </div>
               <div v-if="!curve && curveNote" class="curve-note">{{ curveNote }}</div>
               <div v-if="curve" class="curve-legend">
                 <span v-for="r in (['冲', '稳', '保', '高波动', '数据不足'] as RiskLabel[])" :key="r" class="curve-legend__item">
-                  <i class="curve-legend__dot" :style="{ background: RISK_COLOR[r] }"></i>{{ r }}
+                  <i class="curve-legend__dot" :class="'curve-legend__dot--' + RISK_KEY[r]" :style="legendDotStyle(r)"></i>{{ r }}
                 </span>
                 <span class="curve-legend__item"><i class="curve-legend__dash"></i>你的位次</span>
                 <span v-if="curve.wenBand" class="curve-legend__item"><i class="curve-legend__zone curve-legend__zone--wen"></i>稳档带（最可能录取）</span>
@@ -736,9 +797,9 @@ async function exportPlan(p: VolunteerPlan) {
             <!-- 梯度分析已提升到顶部「方案体检」卡，此处仅保留志愿明细表 -->
             <el-empty v-if="!activePlan.entries.length" description="方案为空：从「智能匹配」或「收藏」加入志愿。" />
             <el-table v-else :data="activePlan.entries" size="small" border>
-              <el-table-column type="index" label="序号" width="60" align="center" />
+              <el-table-column v-if="!isMobile" type="index" label="序号" width="60" align="center" />
               <el-table-column label="档位" width="90" align="center">
-                <template #default="{ row }"><el-tag :type="RISK_TYPE[row.risk as RiskLabel] as any" size="small">{{ row.risk }}</el-tag></template>
+                <template #default="{ row }"><span :class="['risk-tag', 'risk-tag--' + RISK_KEY[row.risk as RiskLabel]]">{{ row.risk }}</span></template>
               </el-table-column>
               <el-table-column prop="school_name" label="院校" min-width="150" show-overflow-tooltip />
               <el-table-column prop="major_name" label="专业" min-width="150" show-overflow-tooltip />
@@ -751,11 +812,11 @@ async function exportPlan(p: VolunteerPlan) {
               <el-table-column label="位次差" width="110" align="center">
                 <template #default="{ row }">{{ diffText(row.rank_diff_last) }}</template>
               </el-table-column>
-              <el-table-column label="城市" width="100">
+              <el-table-column v-if="!isMobile" label="城市" width="100">
                 <template #default="{ row }">{{ row.city || '—' }}</template>
               </el-table-column>
               <el-table-column label="备注" min-width="140">
-                <template #default="{ row }"><el-input v-model="row.note" size="small" placeholder="备注" /></template>
+                <template #default="{ row }"><el-input v-model="row.note" size="small" placeholder="备注" aria-label="备注" /></template>
               </el-table-column>
               <el-table-column label="排序/操作" width="160" align="center" fixed="right">
                 <template #default="{ $index, row }">
@@ -842,7 +903,7 @@ async function exportPlan(p: VolunteerPlan) {
 .checkup__badge {
   font-size: var(--text-sm);
   font-weight: 600;
-  color: var(--color-reach);
+  color: var(--color-reach-text);
   padding: var(--space-1) var(--space-3);
   border-radius: 999px;
   background: #fff;
@@ -859,16 +920,17 @@ async function exportPlan(p: VolunteerPlan) {
   display: grid;
   place-items: center;
   min-width: 44px;
-  color: #fff;
   font-size: var(--text-xs);
   font-weight: 600;
   white-space: nowrap;
 }
-.ratio__seg--success { background: var(--color-match); }
-.ratio__seg--primary { background: var(--color-safe); }
-.ratio__seg--warning { background: var(--color-reach); }
-.ratio__seg--danger { background: var(--color-volatile); }
-.ratio__seg--info { background: var(--color-insufficient); }
+/* 风险分类五色，与 Match.vue/PlanBasket.vue 保持完全一致的 token 映射；
+   文字色按各底色单独挑选出通过 WCAG AA（4.5:1）的深/浅对比方案 */
+.ratio__seg--match { background: var(--color-match); color: var(--color-text); }
+.ratio__seg--safe { background: var(--color-safe); color: #fff; }
+.ratio__seg--reach { background: var(--color-reach); color: var(--color-text); }
+.ratio__seg--volatile { background: var(--color-volatile); color: #fff; }
+.ratio__seg--insufficient { background: var(--color-insufficient); color: var(--color-text); }
 .checkup__list {
   margin: 0;
   padding-left: 1.2em;
@@ -876,8 +938,40 @@ async function exportPlan(p: VolunteerPlan) {
   color: var(--color-text-secondary);
   line-height: 1.9;
 }
-.checkup__list--ok { color: var(--color-match); font-weight: 500; }
+/* 趋势提醒：非阻断信息，与「待优化」问题在视觉上区分开 */
+.checkup__list--note {
+  color: var(--color-text-muted);
+  border-left: 3px solid var(--color-border-strong);
+  padding-left: var(--space-3);
+  margin-bottom: var(--space-2);
+}
+.checkup__list--ok { color: var(--color-match-text); font-weight: 500; }
 .toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-3); margin-bottom: var(--space-4); }
+/* 「更多操作」折叠行动条：与 Match.vue 的「更多筛选」同一套外观，收拢非核心工具栏项 */
+.sec__action {
+  display: flex; align-items: center; gap: 8px;
+  width: 100%;
+  padding: 10px 14px;
+  border: 1px solid var(--color-border-strong, #d5dbe3);
+  border-radius: var(--radius-md, 8px);
+  background: var(--color-primary-soft);
+  color: var(--color-primary);
+  font-size: var(--text-base); font-weight: 600;
+  cursor: pointer;
+  transition: background .15s, border-color .15s;
+}
+.sec__action:hover { background: #dce9ff; border-color: var(--color-primary); }
+.sec__action-arrow { margin-left: auto; transition: transform .2s; }
+.note-collapse { border-top: none; border-bottom: none; margin-bottom: var(--space-4); }
+.note-collapse :deep(.el-collapse-item__header) {
+  height: auto; line-height: 1.5;
+  background: transparent; border: none;
+  font-size: inherit;
+}
+.note-collapse :deep(.el-collapse-item__arrow) { display: none; }
+.note-collapse :deep(.el-collapse-item__header.is-active .sec__action-arrow) { transform: rotate(90deg); }
+.note-collapse :deep(.el-collapse-item__wrap) { border-bottom: none; background: transparent; }
+.note-collapse :deep(.el-collapse-item__content) { padding: var(--space-3) 4px 0; }
 .muted { color: var(--color-text-muted); font-size: var(--text-xs); }
 .plan-meta { color: var(--color-text-secondary); font-size: var(--text-sm); margin-bottom: var(--space-3); }
 .analysis { border: 1px solid var(--color-border); border-radius: var(--radius-md); padding: var(--space-3) var(--space-4); margin-bottom: var(--space-4); background: var(--color-bg-subtle); }
@@ -895,33 +989,47 @@ async function exportPlan(p: VolunteerPlan) {
 
 /* P2a 覆盖曲线 */
 .curve-card { background: linear-gradient(180deg, #fff 0%, var(--color-bg-subtle) 100%); }
+.curve-scroll { overflow-x: auto; }
 .curve { width: 100%; height: auto; display: block; }
+/* 窄屏下不再把 SVG 缩小到坐标轴文字不可读的程度：改为保持原始像素宽度、
+   横向滚动查看（与结果表一致的降级策略），而不是继续按容器宽度等比缩放 */
+@media (max-width: 640px) {
+  .curve { width: auto; min-width: 640px; }
+}
 .curve__grid { stroke: var(--color-border, #e6e8ee); stroke-dasharray: 3 5; }
 .curve__axis { stroke: var(--color-border, #d8dbe2); }
 .curve__tick { font-size: 10px; fill: var(--color-text-muted); }
-.curve__zone--reach { fill: var(--el-color-warning-light-9); opacity: 0.35; }
-.curve__zone--safe { fill: var(--el-color-success-light-9); opacity: 0.4; }
+.curve__zone--reach { fill: var(--color-reach-soft); opacity: 0.6; }
+.curve__zone--safe { fill: var(--color-safe-soft); opacity: 0.7; }
 .curve__zone-label { font-size: 10px; font-weight: 600; letter-spacing: 0.5px; }
-.curve__zone-label--reach { fill: var(--el-color-warning); }
-.curve__zone-label--safe { fill: var(--el-color-success); }
+.curve__zone-label--reach { fill: var(--color-reach-text); }
+.curve__zone-label--safe { fill: var(--color-safe-text); }
 .curve__me { stroke: var(--color-primary); stroke-width: 1.5; stroke-dasharray: 6 4; }
 .curve__me--lo { stroke: var(--color-match); }
 .curve__me-label { font-size: 10px; fill: var(--color-primary); font-weight: 700; paint-order: stroke; stroke: #fff; stroke-width: 3px; }
 .curve__me-label--lo { fill: var(--color-match); }
-.curve__dot { stroke: #fff; stroke-width: 1.5; transition: r 0.15s ease; cursor: pointer; }
+/* 圆/方/三角/菱形/空心圆——transform 而非 r 做悬停放大，跨形状统一生效 */
+.curve__dot { stroke: #fff; stroke-width: 1.5; cursor: pointer; transition: transform 0.15s ease; transform-box: fill-box; transform-origin: center; }
+.curve__dot--insufficient.curve__dot { stroke: var(--color-insufficient); }
 .curve__dot--over { opacity: 0.45; }
 .curve__dot--far { stroke: var(--color-text-muted, #999); stroke-dasharray: 2 2; opacity: 0.6; }
-.curve__dot:hover { r: 7; }
+.curve__dot--far.curve__dot--insufficient { stroke: var(--color-text-muted, #999); }
+.curve__dot:hover { transform: scale(1.4); }
 .curve-legend { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-3); margin-top: var(--space-2); font-size: var(--text-xs); color: var(--color-text-secondary); }
 .curve-legend__item { display: inline-flex; align-items: center; gap: 6px; }
-.curve-legend__dot { width: 8px; height: 8px; border-radius: 50%; }
+.curve-legend__dot { width: 9px; height: 9px; display: inline-block; flex: none; box-sizing: border-box; }
+.curve-legend__dot--match { border-radius: 50%; }
+.curve-legend__dot--safe { border-radius: 1px; }
+.curve-legend__dot--reach { clip-path: polygon(50% 0%, 100% 100%, 0% 100%); }
+.curve-legend__dot--volatile { clip-path: polygon(50% 0%, 100% 50%, 50% 100%, 0% 50%); }
+.curve-legend__dot--insufficient { border-radius: 50%; border: 1.5px dashed; background: #fff !important; }
 .curve-legend__dash { width: 18px; border-top: 2px dashed var(--color-primary); }
 .curve-legend__zone { width: 14px; height: 10px; border-radius: 2px; }
-.curve-legend__zone--reach { background: var(--el-color-warning-light-9); }
-.curve-legend__zone--safe { background: var(--el-color-success-light-9); }
-.curve__wen { fill: var(--el-color-primary-light-9); opacity: 0.7; }
-.curve__wen-label { font-size: 10px; font-weight: 700; fill: var(--color-primary); paint-order: stroke; stroke: #fff; stroke-width: 3px; }
-.curve-legend__zone--wen { background: var(--el-color-primary-light-9); }
+.curve-legend__zone--reach { background: var(--color-reach-soft); }
+.curve-legend__zone--safe { background: var(--color-safe-soft); }
+.curve__wen { fill: var(--color-match-soft); opacity: 0.7; }
+.curve__wen-label { font-size: 10px; font-weight: 700; fill: var(--color-match-text); paint-order: stroke; stroke: #fff; stroke-width: 3px; }
+.curve-legend__zone--wen { background: var(--color-match-soft); }
 .curve-legend__hint { margin-left: auto; color: var(--color-text-muted); }
 /* 分年视图 / 三年叠加 */
 .card__head--curve { flex-wrap: wrap; }
@@ -930,6 +1038,16 @@ async function exportPlan(p: VolunteerPlan) {
 .curve-note { color: var(--color-text-muted); font-size: var(--text-xs); padding: var(--space-2) 0; }
 .curve-legend__line { width: 18px; border-top: 2px dashed currentColor; }
 .curve-legend__gapdot { width: 8px; height: 8px; border-radius: 50%; border: 1.5px dashed var(--color-text-muted, #999); background: #fff; box-sizing: border-box; }
+
+/* 移动端优先（PRODUCT.md 硬要求）：工具栏改单列堆叠，行内小按钮加大触控热区 */
+@media (max-width: 640px) {
+  .toolbar { flex-direction: column; align-items: stretch; }
+  .toolbar > .el-button, .toolbar > .el-select { width: 100%; }
+}
+/* 触控输入设备（不只是窄屏），按 adapt.md 建议用 pointer:coarse 检测 */
+@media (max-width: 640px), (pointer: coarse) {
+  :deep(.el-table .cell .el-button) { min-height: 44px; padding: 8px 12px; }
+}
 </style>
 
 <style>
@@ -943,5 +1061,6 @@ async function exportPlan(p: VolunteerPlan) {
   border-bottom: 1px dashed var(--color-primary);
   margin-left: var(--space-2);
 }
+.help-q:focus-visible { outline: 2px solid var(--color-primary); outline-offset: 2px; }
 .curve-title { display: inline-flex; align-items: baseline; }
 </style>

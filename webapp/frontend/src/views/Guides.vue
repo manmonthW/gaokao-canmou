@@ -62,7 +62,12 @@ onMounted(load)
             class="doc"
             shadow="hover"
             :class="{ 'doc--disabled': !it.available }"
+            role="button"
+            :tabindex="it.available ? 0 : -1"
+            :aria-disabled="!it.available"
             @click="openReader(it)"
+            @keydown.enter="openReader(it)"
+            @keydown.space.prevent="openReader(it)"
           >
             <div class="doc__top">
               <span class="doc__pdf">PDF</span>
@@ -84,6 +89,7 @@ onMounted(load)
               :href="api.guidePdfUrl(it.id)"
               :download="it.filename"
               @click.stop
+              @keydown.stop
             >⬇ 下载原文 PDF</a>
           </el-card>
         </div>
@@ -115,11 +121,12 @@ onMounted(load)
 .grp__grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: var(--space-4); }
 .doc { cursor: pointer; border-radius: var(--radius-lg); transition: transform 0.12s; height: 100%; }
 .doc:hover { transform: translateY(-2px); }
+.doc:focus-visible { outline: 2px solid var(--color-primary); outline-offset: 2px; }
 .doc--disabled { cursor: not-allowed; opacity: 0.6; }
 .doc__top { display: flex; align-items: center; gap: var(--space-2); margin-bottom: var(--space-2); }
 .doc__pdf {
   font-size: 10px; font-weight: 700; letter-spacing: 0.05em;
-  color: #d93026; background: rgba(217, 48, 38, 0.08);
+  color: var(--color-doc-accent); background: var(--color-doc-accent-soft);
   border-radius: 4px; padding: 2px 6px;
 }
 .doc__title { font-weight: 600; font-size: var(--text-base); line-height: 1.5; margin-bottom: var(--space-2); }

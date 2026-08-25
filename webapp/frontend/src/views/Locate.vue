@@ -175,7 +175,14 @@ const refYearsText = computed(() => {
         <!-- 选科组合覆盖率联动：首选 + 两门再选齐备时显示 -->
         <div v-if="combos" class="combo-row">
           <template v-if="myCombo">
-            <span class="combo-pill" @click="openComboDetail(myCombo)">
+            <span
+              class="combo-pill"
+              role="button"
+              tabindex="0"
+              @click="openComboDetail(myCombo)"
+              @keydown.enter="openComboDetail(myCombo)"
+              @keydown.space.prevent="openComboDetail(myCombo)"
+            >
               你的组合 <b>{{ myCombo.first }} + {{ myCombo.electives.join(' + ') }}</b>
               · 专业覆盖率 ≈ <b class="tnum">{{ myCombo.coverage }}%</b>
               <span class="combo-pill__view">看组合分析 →</span>
@@ -349,7 +356,7 @@ const refYearsText = computed(() => {
         </div>
 
         <div class="flow-step">
-          <div class="flow-badge" style="--c: var(--color-reach); --c-soft: var(--color-reach-soft)">
+          <div class="flow-badge" style="--c: var(--color-reach-text); --c-soft: var(--color-reach-soft)">
             <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 17l6-6-6-6M12 19h8"/></svg>
           </div>
           <div class="flow-body">
@@ -363,7 +370,7 @@ const refYearsText = computed(() => {
         </div>
 
         <div class="flow-step">
-          <div class="flow-badge" style="--c: var(--color-match); --c-soft: var(--color-match-soft)">
+          <div class="flow-badge" style="--c: var(--color-match-text); --c-soft: var(--color-match-soft)">
             <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 11l3 3L22 4M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>
           </div>
           <div class="flow-body">
@@ -407,6 +414,7 @@ const refYearsText = computed(() => {
   background: var(--color-primary-soft); border: 1px solid var(--color-border);
   font-size: var(--text-sm); color: var(--color-text-secondary);
 }
+.combo-pill:focus-visible { outline: 2px solid var(--color-primary); outline-offset: 2px; }
 .combo-pill b { color: var(--color-primary); }
 .combo-pill__view { font-size: var(--text-xs); color: var(--color-primary); }
 .combo-hint { font-size: var(--text-xs); color: var(--color-text-muted); }
@@ -447,7 +455,7 @@ const refYearsText = computed(() => {
 .next-cta__text { color: var(--color-text-secondary); font-size: var(--text-base); }
 
 .line-margin { margin-left: var(--space-2); font-size: var(--text-sm); }
-.line-margin.ahead { color: var(--color-match); }
+.line-margin.ahead { color: var(--color-match-text); }
 .line-margin.behind { color: var(--color-text-muted); }
 .hint { color: var(--color-text-muted); font-size: var(--text-xs); margin: var(--space-3) 0 0; line-height: 1.7; }
 /* 操作流程图 */

@@ -17,6 +17,14 @@ const open = ref(false)
 const data = ref<MajorDetail | null>(null)
 const loading = ref(false)
 
+import TrendBadge from '@/components/TrendBadge.vue'
+import TrendDetail from '@/components/TrendDetail.vue'
+
+// 冷热趋势：本科批在前（主战场），「样本不足」不渲染（数据为空不占位）
+const trendGroups = computed(() =>
+  (data.value?.trend || []).filter((t) => t.label !== '样本不足'),
+)
+
 // 第五轮学科评估：按 A+ → A → A- 顺序展示
 const EVAL5_ORDER = ['A+', 'A', 'A-']
 const eval5Grades = computed(() => {
@@ -103,6 +111,26 @@ function viewAdmission(name: string) {
           </div>
         </div>
 
+        <!-- 近三年冷热趋势（migration 0017）。按学科类×批次分组展示，
+             不跨学科类合并——同一专业在物理/历史类可能结论相反。 -->
+        <div class="d-section" v-if="trendGroups.length">
+          <h4 class="d-h">
+            近三年录取门槛走势
+            <el-tooltip placement="top" effect="dark"
+              content="以在辽招生的同「院校+专业」逐年对照，扣除全省整体漂移后得出；三年仅两个年段，趋势判断置信度有限，不用于预测明年门槛。不覆盖艺术类、体育类与提前批。"
+            >
+              <i class="d-help" tabindex="0">ⓘ</i>
+            </el-tooltip>
+          </h4>
+          <div v-for="g in trendGroups" :key="g.subject + g.batch" class="trend-grp">
+            <div class="trend-grp__head">
+              <span class="trend-grp__scope">{{ g.subject }} · {{ g.batch }}</span>
+              <TrendBadge :trend="g" :badge-only="false" />
+            </div>
+            <TrendDetail :trend="g" />
+          </div>
+        </div>
+
         <div class="d-section" v-if="data.hot_profile.introduction">
           <h4 class="d-h">专业介绍</h4>
           <p class="d-p">{{ data.hot_profile.introduction }}</p>
@@ -113,7 +141,7 @@ function viewAdmission(name: string) {
           <h4 class="d-h">
             第五轮学科评估
             <el-tooltip :content="`对应学科：${data.eval5.discipline}。教育部第五轮学科评估结果（A+/A/A-），来自各校公开发布汇总，官方未集中公布完整名单，仅供参考。`" placement="top" effect="dark">
-              <i class="d-help">ⓘ</i>
+              <i class="d-help" tabindex="0">ⓘ</i>
             </el-tooltip>
           </h4>
           <div class="eval5-block">
@@ -200,6 +228,10 @@ function viewAdmission(name: string) {
 .d-tags { display: flex; gap: var(--space-2); flex-wrap: wrap; margin-bottom: var(--space-2); }
 .d-image { margin-bottom: var(--space-4); border-radius: var(--radius-lg); overflow: hidden; box-shadow: var(--shadow-sm); }
 .d-image img { width: 100%; display: block; }
+.trend-grp { margin-bottom: var(--space-4); }
+.trend-grp:last-child { margin-bottom: 0; }
+.trend-grp__head { display: flex; align-items: center; gap: var(--space-2); margin-bottom: var(--space-1); flex-wrap: wrap; }
+.trend-grp__scope { font-size: var(--text-xs); color: var(--color-text-muted); }
 .d-h { font-size: var(--text-sm); font-weight: 600; margin: 0 0 var(--space-2); color: var(--color-text, #333); }
 .d-p { font-size: var(--text-sm); line-height: 1.7; color: var(--color-text-secondary); margin: 0; }
 .d-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: var(--space-2); }
@@ -219,6 +251,7 @@ function viewAdmission(name: string) {
   margin-left: 4px;
   vertical-align: middle;
 }
+.d-help:focus-visible { outline: 2px solid var(--color-primary); outline-offset: 2px; }
 .eval5-block { display: flex; flex-direction: column; gap: 6px; }
 .eval5-row { display: flex; align-items: flex-start; gap: 8px; }
 .eval5-grade {

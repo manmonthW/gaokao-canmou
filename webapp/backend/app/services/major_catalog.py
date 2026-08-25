@@ -15,6 +15,7 @@
   读路径直连汇总表；旧库未跑 0015 时降级回原实时 ILIKE 查询，功能不回归。
 """
 from app import db
+from app.services.match import TREND_LABEL_DISPLAY
 from app.config import MAX_PAGE_SIZE
 
 
@@ -106,6 +107,24 @@ async def search_catalog(
                 LIMIT %s""",
             params,
         )
+    # 列表徽标用的趋势标签（0017）：一次批量取，避免逐行查询。
+    # 只取本科批的持续趋势——列表是扫读场景，「平稳/样本不足」不渲染徽标
+    # （house rule：数据为空不占位），把它们一并带下去只会增加前端判空负担。
+    names = [r[1] for r in rows]
+    trend_map: dict = {}
+    if names:
+        try:
+            for mk, subject, lab in await db.fetch_all(
+                """SELECT major_key, subject, label FROM major_trend
+                    WHERE major_key = ANY(%s) AND batch = '本科批'
+                      AND label IN ('持续降温','持续升温','趋势（内部分化）')""",
+                (names,),
+            ):
+                trend_map.setdefault(mk, []).append(
+                    {"subject": subject, "label": lab,
+                     "label_display": TREND_LABEL_DISPLAY.get(lab, lab)})
+        except Exception:
+            trend_map = {}          # 旧库未跑 0017：静默降级，列表照常渲染
     return [
         {
             "code": r[0],
@@ -116,6 +135,8 @@ async def search_catalog(
             "lowest_score_range": [r[5], r[6]],
             "lowest_rank_range": [r[7], r[8]],
             "has_admission": (r[4] or 0) > 0,
+            # 新键追加在末尾（契约只增不改）
+            "trend_labels": trend_map.get(r[1], []),
         }
         for r in rows
     ]
@@ -161,6 +182,57 @@ async def get_major_eval5(name: str):
     for grade, school in rows:
         grades.setdefault(grade, []).append(school)
     return {"discipline": discipline, "grades": grades}
+
+
+async def get_major_trend(name: str):
+    """返回该标准专业的冷热趋势（migration 0017），按学科类×批次分组。
+
+    **不跨学科类合并**：docs/major-trend-2024-2026.md §3.4 已证明法学、会计学、
+    金融学在物理类与历史类结论相反，合并会得出错误结论。
+
+    每组附「在辽招生单元数」——这一条比标签本身更重要：人工智能门槛平稳但单元
+    +67%（强需求吃下扩招），土木工程门槛平稳但单元 −28%（靠缩招撑住），
+    只看标签会把两者都读成「没变化」。旧库（未跑 0017）返回空列表。
+    """
+    try:
+        rows = await db.fetch_all(
+            """SELECT t.subject, t.batch, t.label, t.label_reason,
+                      t.n_pairs_2, t.concord_2, t.excess_total,
+                      t.units_2024, t.units_2025, t.units_2026, t.tier_split,
+                      t.eq_score_delta, t.eq_score_delta_market,
+                      c.note, c.source_name, c.source_url, c.published_on
+                 FROM major_trend t
+                 LEFT JOIN major_trend_context c
+                   ON c.major_key = t.major_key AND c.subject IN (t.subject, '')
+                WHERE t.major_key = %s
+                ORDER BY t.batch DESC, t.subject""",
+            (name,),
+        )
+    except Exception:
+        return []
+    out = []
+    for (subject, batch, lab, reason, n2, conc, ex,
+         n24, n25, n26, tiers, eqd, eqm,
+         ctx_note, ctx_src, ctx_url, ctx_on) in rows:
+        out.append({
+            "subject": subject,
+            "batch": batch,
+            "label": lab,
+            "label_display": TREND_LABEL_DISPLAY.get(lab, lab),
+            "label_reason": reason,
+            "n_schools": n2,
+            "concord": float(conc) if conc is not None else None,
+            "excess_total": float(ex) if ex is not None else None,
+            "units": {"2024": n24, "2025": n25, "2026": n26},
+            "tier_split": tiers,
+            "eq_score_delta": float(eqd) if eqd is not None else None,
+            "eq_score_delta_market": float(eqm) if eqm is not None else None,
+            "context": ({"note": ctx_note, "source_name": ctx_src,
+                         "source_url": ctx_url,
+                         "published_on": ctx_on.isoformat() if ctx_on else None}
+                        if ctx_note else None),
+        })
+    return out
 
 
 async def get_major_detail(name: str):
@@ -216,6 +288,8 @@ async def get_major_detail(name: str):
 
     # 第五轮学科评估 A 类结果（经 major_eval_map 关联到该专业）
     eval5 = await get_major_eval5(name)
+    # 冷热趋势（0017）：新键追加在末尾，契约只增不改
+    trend = await get_major_trend(name)
 
     return {
         "code": row[0],
@@ -224,4 +298,5 @@ async def get_major_detail(name: str):
         "discipline": row[3],
         "hot_profile": hot,
         "eval5": eval5,
+        "trend": trend,
     }

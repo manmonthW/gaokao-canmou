@@ -118,6 +118,8 @@ export function toSnapshot(
     over_safe: c.over_safe ?? false,
     over_reach: c.over_reach ?? false,
     safe_band: c.safe_band ?? null,
+    // 0017：只存标签，不存整个趋势对象——方案快照要小，且体检只需要标签
+    trend_label: c.major_trend?.label ?? null,
     data_version: dataVersion,
     examinee_rank: examineeRank,
     saved_at: new Date().toISOString().slice(0, 19).replace('T', ' '),
@@ -242,6 +244,7 @@ export function usePlanner() {
         counts,
         total,
         warnings: ['方案为空：请从「智能匹配」或「收藏」中加入志愿。'],
+        notes: [] as string[],
         ok: false,
         issues: 0,
       }
@@ -306,9 +309,26 @@ export function usePlanner() {
         problems.push(`含 ${overReach.length} 个「超冲」（门槛好于你位次 20% 以上）：差距过大基本只消耗槽位，建议最多保留 1–2 个梦想位置于表头。`)
       }
     }
+    // 0017 趋势提示：**不是问题，是提醒**，单独一条通道。
+    // 分档以「历史最难年」为保守基准，对门槛连降的专业偏保守、对连升的偏乐观；
+    // 约 22% 的招生单元带趋势标签，若混进 problems 会让几乎每个方案都显示「待优化」
+    // 并挡住导出按钮（Workbench 的导出按 analysis.ok 门控）。
+    const notes: string[] = []
+    const cooling = p.entries.filter(
+      (e) => e.trend_label === '持续降温' || e.trend_label === '趋势（内部分化）',
+    ).length
+    const heating = p.entries.filter((e) => e.trend_label === '持续升温').length
+    if (cooling > 0) {
+      notes.push(`有 ${cooling} 个志愿所属专业门槛连降两年。本表分档以历史最难年为基准，`
+        + '对它们偏保守——这些位置实际可能比标注的更容易录取。')
+    }
+    if (heating > 0) {
+      notes.push(`有 ${heating} 个志愿所属专业门槛连升两年。去年门槛可能低估明年，`
+        + '这些位置宜留更多余量，不要当作稳档看待。')
+    }
     const ok = problems.length === 0
     const warnings = ok ? ['梯度结构良好：冲稳保配置合理，无重复与数据缺失。'] : problems
-    return { counts, total, warnings, ok, issues: problems.length }
+    return { counts, total, warnings, notes, ok, issues: problems.length }
   }
 
   return {

@@ -51,7 +51,9 @@ assert all((c.get('safe_band') == '过深保底') == bool(c.get('over_safe')) fo
 assert all(c['risk'] == '冲' for c in u if c.get('over_reach')), 'over_reach 只应出现在冲档'
 print('首页一致性 OK（首页为保档最贴近项，超冲/过深示例见下方分区采样）')
 # 最接近匹配排序：保池首页＝最浅（最好）保底，不应出现 over_safe；
-# 过深项沉到保池尾部（totals保 11973 → page 239）；冲档超冲在冲区尾部页采样
+# 过深项沉到保池尾部；冲档超冲在冲区尾部页采样。
+# 尾页页码由 totals['保'] 现算，不写死——保池规模会随数据口径变化
+# （如 0017 修正跨年配对键后就变了），写死页码会让本断言变成假失败。
 dd = get('/match', {'year': 2027, 'category': cat, 'subject': '物理学科类',
                     'batch': batch, 'rank_lo': 11000, 'rank_hi': 13000,
                     'page_size': 50, 'page': 1})
@@ -59,11 +61,14 @@ tail = dd.get('items', [])
 assert all(c['risk'] == '保' for c in tail), f'page=1 应仍在保池，实际档位: {sorted(set(c["risk"] for c in tail))}'
 assert not any(c.get('over_safe') for c in tail), '最接近匹配排序下，首页不应出现过深保底'
 print('首页 over_safe 为空 OK（最浅保底在前）; 首页示例:', tail[0]['school_name'], 'best=', tail[0]['best_rank'])
+n_safe = dd.get('totals', {}).get('保') or 0
+last_page = max(1, (n_safe + 49) // 50 - 1)      # 保池最后一整页（避开可能不满的末页）
 dd = get('/match', {'year': 2027, 'category': cat, 'subject': '物理学科类',
                     'batch': batch, 'rank_lo': 11000, 'rank_hi': 13000,
-                    'page_size': 50, 'page': 239})
+                    'page_size': 50, 'page': last_page})
 tail = dd.get('items', [])
-assert all(c['risk'] == '保' for c in tail), f'page=239 应仍在保池，实际档位: {sorted(set(c["risk"] for c in tail))}'
+assert all(c['risk'] == '保' for c in tail), \
+    f'page={last_page}（保池共 {n_safe} 项）应仍在保池，实际档位: {sorted(set(c["risk"] for c in tail))}'
 ov = [c for c in tail if c.get('over_safe')]
 assert ov, '保池尾部（最远端）应存在 over_safe 项'
 print('保池尾部 over_safe 示例:', ov[0]['school_name'], 'best=', ov[0]['best_rank'], '(R_hi×3=', 13000 * 3, ')')

@@ -56,6 +56,77 @@ async def _strength_available() -> tuple:
             _strength_schema = (False, False)
     return _strength_schema
 
+# --------------------------- 0017 趋势数据可用性探测（旧库降级，同 C1 模式） ---------------------------
+_trend_schema = None
+
+# 趋势词表：字形 + 中性文案 + 解释 + 是否低置信。字形与文字一起承担分类信息，
+# 不靠颜色区分（PRODUCT.md 色觉友好要求：风险/分类标签不能仅靠颜色传达）。
+TREND_DICTIONARY = [
+    {"label": "持续降温", "display": "门槛连降两年", "glyph": "↓",
+     "confidence": "high", "badge": True,
+     "tip": "该专业在辽招生的录取门槛连续两年相对全省走低。含义是：用「历史最难年」"
+            "作参考会偏保守，不代表这个专业值得报或不值得报。"},
+    {"label": "持续升温", "display": "门槛连升两年", "glyph": "↑",
+     "confidence": "high", "badge": True,
+     "tip": "该专业在辽招生的录取门槛连续两年相对全省走高。含义是：去年的门槛可能"
+            "低估明年，留的余量要更多。"},
+    {"label": "趋势（内部分化）", "display": "连降两年·院校分化", "glyph": "↓",
+     "confidence": "high", "badge": True,
+     "tip": "整体连降两年，但各院校步调不一致——多由部分院校拉动，看具体学校更靠谱。"},
+    {"label": "震荡/大小年", "display": "大小年波动", "glyph": "↕",
+     "confidence": "low", "badge": False,
+     "tip": "两年一升一降，属典型大小年。这类专业最适合用历史区间法参考，不要只看去年。"},
+    {"label": "单年跳变", "display": "近一年跳变", "glyph": "·",
+     "confidence": "low", "badge": False,
+     "tip": "只有一个年段出现显著变化，另一段在正常波动范围内，尚不足以称为趋势。"},
+    {"label": "平稳", "display": "近三年平稳", "glyph": "—",
+     "confidence": "high", "badge": False,
+     "tip": "近三年门槛相对全省没有明显移动。请同时看「在辽招生单元数」——"
+            "招生量大幅增减时，门槛平稳的含义完全不同。"},
+    {"label": "样本不足", "display": "样本不足", "glyph": "",
+     "confidence": "none", "badge": False,
+     "tip": "开设该专业的院校太少或缺一个年段的可比数据，不做趋势判断。"},
+]
+
+TREND_LABEL_DISPLAY = {d["label"]: d["display"] for d in TREND_DICTIONARY}
+
+
+async def get_market_drift(subject: str, batch: str) -> list:
+    """全省大盘门槛漂移基准（0017），供前端历年门槛曲线叠加基准线。
+
+    有了这条线，用户才能区分「是全省整体在动，还是这个专业自己在动」——
+    这是全部趋势展示里最关键的一张图。旧库返回空列表。
+    """
+    try:
+        rows = await db.fetch_all(
+            """SELECT year_from, year_to, drift_log FROM major_trend_market
+                WHERE subject = %s AND batch = ANY(%s)
+                ORDER BY year_from""",
+            (subject, _batch_variants(batch)),
+        )
+    except psycopg2.Error as e:
+        if not db.schema_missing(e):
+            raise
+        return []
+    return [{"year_from": a, "year_to": b, "drift_log": float(d)}
+            for a, b, d in rows]
+
+
+async def _trend_available() -> bool:
+    """major_trend / major_trend_alias 是否存在；探测失败视为不可用。"""
+    global _trend_schema
+    if _trend_schema is None:
+        try:
+            row = await db.fetch_one(
+                "SELECT count(*) FROM information_schema.tables "
+                "WHERE table_schema='public' "
+                "AND table_name IN ('major_trend','major_trend_alias')")
+            _trend_schema = bool(row and row[0] == 2)
+        except psycopg2.Error:
+            _trend_schema = False
+    return _trend_schema
+
+
 # --------------------------- 候选管线缓存（方案一优化，0016） ---------------------------
 # _prepare_candidates 的输出只依赖入参与库内数据，与前端分页/切档/偏好切换无关；
 # 交互中同一候选集被反复重算（基线约 9s/次）。按 (data_version + 全部入参)
@@ -79,12 +150,18 @@ MATCH_CONFIG = {
     # 分类所需最少年份：<2 年判为「数据不足」
     "min_years": 2,
     # 「保」档安全边际（A1）：R <= best × safe_margin 才判保。
-    # margin=0.85 回测定参：门槛年际比值 P10≈0.87，margin=0.85 时次年门槛仍 >= best×0.85
-    # 的比例为物理 91.6% / 历史 92.4%（backtest_report.txt）；
+    # 2026-08-25 用修正配对口径重新定参（旧口径按省内专业代码归并，把不同专业接成
+    # 一条时间线，凭空放大了年际波动，见 _build_unit_key）：门槛年际比值 P10 由 0.87
+    # 修正为 0.88~0.94，margin=0.85 时次年门槛仍 >= best×0.85 的比例升到
+    # 本科批 95.7%~98.5% / 专科批 88.2%~99.5%（backtest_report.txt 8 组）。
+    # **维持 0.85 不放宽**：新数字说明它比设计意图更安全，而放宽是唯一可能导致滑档的
+    # 方向；两对年份的证据不足以支撑冒这个险。
     # 调整本参数必须附回测报告（spec §7.4，A2 制度化）。
     "safe_margin": 0.85,
-    # 高波动判定：相对波动(跨度/中位) >= 该值 且 绝对跨度 >= min_abs_span
-    # （回测：跨年相对变动中位 6.2%/7.4%、P90 31%/28%、≥50% 占比 4.7%/3.5%，0.5 阈值隔离尾部）
+    # 高波动判定：相对波动(跨度/中位) >= 该值 且 绝对跨度 >= min_abs_span，
+    # 且**序列非单调**（单调是趋势不是波动，见 _classify）。
+    # 修正配对口径后回测：跨年相对变动中位 2.4%~8.6%、P90 8.1%~21.4%、
+    # ≥50% 占比 0.0%~1.4%（旧口径为 4.7%/3.5%，虚高来自错并单元），0.5 仍稳稳隔离尾部。
     "high_vol_rel": 0.5,
     "high_vol_abs": 2000,
     # 断档判定：最差年份位次 > 中位 * break_multiplier
@@ -154,22 +231,29 @@ def _batch_variants(batch):
 # 调整 MATCH_CONFIG 必须重跑回测并同步更新本说明（spec §7.4）。
 CLASSIFICATION_NOTE = {
     "method": "位次法：拿每个单元历年录取最低分对应的全省位次，与你的位次比较，"
-              "分成保/稳/冲/高波动/数据不足五档；分档是对明年门槛的区间判断，不是对历史的事实陈述。",
+              "分成保/稳/冲/高波动/数据不足五档；分档是对明年门槛的区间判断，不是对历史的事实陈述。"
+              "保档安全线锚在历史最难年（最保守），稳/冲分界锚在最近一年"
+              "（回测显示区间中位会把过时年份的宽松门槛算进来，对门槛连升的专业系统性偏乐观）。",
     "safe_margin": MATCH_CONFIG["safe_margin"],
     "backtest": {
         "pair": "用某一年数据判档、用次年实际投档门槛检验（同单元跨年对照），"
-                "共做两对：2024→2025、2025→2026，每对均覆盖本科批与专科批",
+                "共做两对：2024→2025、2025→2026，每对均覆盖物理/历史学科类 × 本科批/专科批",
         "margin_coverage": (
             "被判「保」的单元中，次年门槛实际没有越过安全线的比例："
-            "本科批——2025→2026 物理学科类 91.6%（7,027 个单元）、历史学科类 92.4%（1,896 个单元），"
-            "2024→2025 物理学科类 92.1%（6,858 个单元）、历史学科类 93.3%（1,951 个单元）；"
-            "专科批——2025→2026 物理学科类 97.2%（1,646 个单元）、历史学科类 79.1%（1,254 个单元），"
-            "2024→2025 物理学科类 95.7%（1,713 个单元）、历史学科类 88.6%（1,118 个单元）"
-            "——本科批「保」的判定次年九成以上依旧成立；专科批中历史学科类门槛年际波动更大，"
+            "本科批——2025→2026 物理学科类 98.2%（8,809 个单元）、历史学科类 95.7%（2,692 个单元），"
+            "2024→2025 物理学科类 98.5%（8,377 个单元）、历史学科类 96.0%（2,449 个单元）；"
+            "专科批——2025→2026 物理学科类 99.5%（2,458 个单元）、历史学科类 88.2%（1,849 个单元），"
+            "2024→2025 物理学科类 99.0%（2,400 个单元）、历史学科类 94.6%（1,534 个单元）"
+            "——本科批「保」的判定次年 95% 以上依旧成立；专科批中历史学科类门槛年际波动更大，"
             "「保」的可靠性相对偏低，参考时宜更保守"),
         "rel_delta": (
-            "录取位次次年际变动：6 组回测中，单元变动中位数约 4–10%，九成单元变动在 32% 以内；"
-            "变动 ≥50% 的占 0.2%–5.0%（本科批偏高、专科批偏低），这类单元会被标为「高波动」"),
+            "录取位次次年际变动：8 组回测中，单元变动中位数约 2–9%，九成单元变动在 22% 以内；"
+            "变动 ≥50% 的占 0.0%–1.4%，这类单元中**非单向移动**的会被标为「高波动」"
+            "（逐年同向移动属趋势，照常分档并单独说明）"),
+        "pairing": (
+            "跨年配对以规范化专业名为单元身份，不用省内专业代码——代码逐年重排，"
+            "按代码归并会把不同专业接成一条时间线（旧口径下本科批 36%、专科批 68% 的"
+            "多年单元存在这种错并）。2026-08-25 修正后重跑，上述覆盖率与变动幅度均为新口径"),
     },
     "disclaimer": "以上比例衡量的是门槛跨年是否稳定（即分档规则是否可靠），不是录取概率；本站不输出概率数字。",
 }
@@ -362,10 +446,30 @@ async def get_data_version() -> Optional[str]:
     return rel[0] if rel else None
 
 
+# 跨年配对用的专业名规范化：全角标点转半角、去空格。
+# 实测同一单元会在不同年份写成「临床医学(5+3一体化,儿科学)」与
+# 「临床医学(5+3一体化，儿科学)」——只差一个全角逗号。
+_NAME_PUNCT = str.maketrans("（）［］【】，、；：·　", "()[][],,;;: ")
+
+
+def _name_key(major_name):
+    return (major_name or "").translate(_NAME_PUNCT).replace(" ", "")
+
+
 def _build_unit_key(school_code, major_code, major_name, batch):
-    mkey = major_code if major_code else major_name
-    # A4：批次别名归一，使 2025 本科提前批与 2026 A/B 段合并为同一单元
-    return (school_code, mkey, _normalize_batch(batch))
+    """单元身份键（跨年稳定）。
+
+    **不能用省内专业代码单独做键**：它是逐年重排的顺序号，不是稳定标识。
+    例：中国医科大学「临床医学」2024 年代码 09、2025 年代码 04，而 2024 年的
+    代码 04 是另一个专业——按代码归并会把不同专业接成一条时间线（实测多年单元中
+    本科批 36%、专科批 68% 被这样错并，凭空造出「断档」与「高波动」）。
+
+    改以**规范化专业名**为身份，专业代码只用于消歧（见 _pair_units）：同一院校
+    同名的多个单元（如石家庄邮电「邮政快递运营管理」12 个定向单元，门槛横跨
+    6.0 万~8.2 万）由 _pair_units 拆开后各自带上后缀，不会被压成一个。
+    A4：批次别名归一，使 2025 本科提前批与 2026 A/B 段合并为同一单元。
+    """
+    return (school_code, _name_key(major_name), _normalize_batch(batch))
 
 
 def _over_safe(risk: str, best_rank, R: int, cfg: dict) -> bool:
@@ -403,15 +507,24 @@ def _classify(unit: dict, R: int, cfg: dict):
 
     single = n < cfg["min_years"]  # 仅 1 年：仍按该年分类，但提示参考性有限
     best, worst, med = unit["best_rank"], unit["worst_rank"], unit["median_rank"]
+    # A5 稳/冲分界锚点：由「三年区间中位」改为「最近一年门槛」。
+    # 回测（2024+2025 判档 → 2026 实测，修正配对口径）：本科批两侧误差同时下降——
+    # 门槛连降专业的「本可录取却判冲」从 11.2% 降到 8.3%，门槛连升专业的
+    # 「判稳实则够不着」从 4.6% 降到 3.3%。区间中位把过时年份的宽松门槛算进来，
+    # 对连升专业系统性偏乐观。保档安全线仍用 best（见 safe_line），不动。
+    bound = unit.get("last_year_rank") or med
     margin = cfg["safe_margin"]
     safe_line = int(best * margin)  # 保档门槛：历史最难年门槛再收紧 margin
     rel = (unit["span"] / med) if med else 0.0
 
-    # 高波动优先（位次极不稳定，单独成档；至少 2 年才有意义）
-    if not single and rel >= cfg["high_vol_rel"] and unit["span"] >= cfg["high_vol_abs"]:
+    # 高波动优先（位次极不稳定，单独成档；至少 2 年才有意义）。
+    # 但**单调序列不算波动**：逐年同向移动是趋势，跨度大是趋势的结果而非不确定性，
+    # 应当照常分档并由趋势说明解释（unit["monotonic"] 见第四步）。
+    if (not single and unit.get("monotonic") is None
+            and rel >= cfg["high_vol_rel"] and unit["span"] >= cfg["high_vol_abs"]):
         return (
             "高波动",
-            f"历年位次跨度大（{best}～{worst}，相对波动 {rel:.0%}），结果不确定性高。",
+            f"历年位次跨度大（{best}～{worst}，相对波动 {rel:.0%}），且非单向移动，结果不确定性高。",
         )
 
     if R <= safe_line:
@@ -425,15 +538,15 @@ def _classify(unit: dict, R: int, cfg: dict):
         reason = (
             f"你的位次 {R} 优于历史最难年门槛 {best}，但未越过安全边际线 {safe_line}；"
             f"门槛年际变动可能吃掉这段领先（回测口径），按「稳」对待。")
-    elif R <= med:
+    elif R <= bound:
         base = "稳"
         reason = (
-            f"你的位次 {R} 落在历史门槛区间 [{best}, {worst}] 内、优于中位 {med}；"
+            f"你的位次 {R} 落在历史门槛区间 [{best}, {worst}] 内、优于最近年门槛 {bound}；"
             f"明年门槛若在区间内移动，录取机会较大。")
     elif R <= worst:
         base = "冲"
         reason = (
-            f"你的位次 {R} 落在历史门槛区间 [{best}, {worst}] 内、劣于中位 {med}；"
+            f"你的位次 {R} 落在历史门槛区间 [{best}, {worst}] 内、劣于最近年门槛 {bound}；"
             f"需明年门槛偏向区间宽松端才可进档，属可冲刺。")
     else:
         base = "冲"
@@ -467,6 +580,20 @@ def _build_candidate(unit: dict, R: int, cfg: dict):
     if over_reach:
         reason += (f"（注意：历史门槛 {unit['best_rank']} 好于你的位次 {R} 超过 20%，差距过大，"
                    "需明年门槛大幅回落才有机会，基本只消耗槽位，建议仅作表头梦想位。）")
+    # 趋势提示（0017）：只补充解释，不改分档。
+    # 「门槛连降两年」时保档安全线仍锚在历史最难年，对这类专业偏保守——把这件事
+    # 明说，用户才知道该不该多占一个槽位；「门槛连升两年」则相反，去年门槛偏低。
+    tr = unit.get("major_trend")
+    # 只在该单元本身有多年历史时才提「最难年」——仅 1 年数据的单元没有「最难年」
+    # 可言，这句话会变成噪声。专业级趋势本身仍通过徽标展示，不受影响。
+    if tr and unit.get("best_rank") and unit["n_years"] >= cfg["min_years"]:
+        yrs = [y for y, _ in unit["yearly"]]
+        if tr["label"] in ("持续降温", "趋势（内部分化）") and yrs:
+            best_year = min(unit["yearly"], key=lambda t: t[1])[0]
+            reason += (f" 该专业门槛连降两年，本档以历史最难年（{best_year}）为基准，"
+                       "对它偏保守。")
+        elif tr["label"] == "持续升温":
+            reason += " 该专业门槛连升两年，去年门槛可能低估明年，宜留更多余量。"
     last = unit["last_year_rank"]
     rank_diff_last = (R - last) if last is not None else None
     if risk == "数据不足":
@@ -522,6 +649,15 @@ def _build_candidate(unit: dict, R: int, cfg: dict):
         "is_211": unit.get("is_211"),
         "strength_tags": unit.get("strength_tags", []),
         "major_strength": unit.get("major_strength", []),
+        # 0017 新增附加键（同样一律置于末尾）：
+        # monotonic —— 三年门槛是否单向移动（"松"/"紧"/None）；_risk_at 需要它才能
+        #   在敏感度试算里复现同一个高波动判定。
+        # multi_unit_years —— 当年该院校该专业有几个招生单元（含定向等）；
+        #   >1 说明门槛是当年多个单元的中位，展示层须说明。
+        # major_trend —— 专业级冷热趋势（migration 0017），旧库为 None。
+        "monotonic": unit.get("monotonic"),
+        "multi_unit_years": unit.get("multi_unit_years") or {},
+        "major_trend": unit.get("major_trend"),
     }
 
 
@@ -581,17 +717,23 @@ async def _prepare_candidates(
     )
 
     # ---------- 第三步：构造候选单元 ----------
-    units: dict = {}
+    # 单元身份 = 院校 + 规范化专业名 + 归一批次（见 _build_unit_key 的说明：
+    # 省内专业代码逐年重排，不能做身份）。同一院校同一专业在同一年出现多行的
+    # 情况占 0.46%（如石家庄邮电「邮政快递运营管理」12 个定向单元，2025 年代码
+    # 31~3E、2026 年换成 51~5E），代码同样对不上，无法逐一配对；这类组按**当年
+    # 中位门槛**归并成一个单元，并记录当年单元数，让展示层说明「当年 N 个招生
+    # 单元（含定向等）」，而不是拆成一堆彼此错位的「数据不足」行。
+    groups: dict = {}
     for (
         y, sc, sn, mc, mn, bt, lr, lscore, fl,
         prov, cty, lvl, nat, typ,
         is985, is211, isdfc, ctier, stags,
     ) in rows:
         key = _build_unit_key(sc, mc, mn, bt)
-        u = units.get(key)
-        if u is None:
+        g = groups.get(key)
+        if g is None:
             # 跨年合并单元的批次名：优先用用户请求的批次名，避免展示成某年的别名段
-            u = {
+            g = {
                 "school_code": sc, "school_name": sn,
                 "major_code": mc, "major_name": mn,
                 "batch": batch if _normalize_batch(bt) == _normalize_batch(batch) else bt,
@@ -604,16 +746,41 @@ async def _prepare_candidates(
                 "years": [], "ranks": [], "yearly": [], "scores": {},
                 "rank_years": set(),
                 "flags": set(),
+                "_by_year": {},          # year -> {"ranks": [...], "scores": [...], "codes": [...]}
             }
-            units[key] = u
-        u["flags"] |= set(fl or [])
-        u["years"].append(y)
-        if lscore is not None:
-            u["scores"][y] = lscore
+            groups[key] = g
+        g["flags"] |= set(fl or [])
+        slot = g["_by_year"].setdefault(y, {"ranks": [], "scores": [], "codes": []})
         if lr is not None:
-            u["ranks"].append(lr)
-            u["yearly"].append((y, lr))
-            u["rank_years"].add(y)  # A4：有位次的年份（与 n_years 同源）
+            slot["ranks"].append(lr)
+        if lscore is not None:
+            slot["scores"].append(lscore)
+        if mc:
+            slot["codes"].append(mc)
+        # 展示用的专业名/代码取最新年的写法（专业名年际可能微调，如括号内方向增删）
+        if y >= max(g["years"], default=0):
+            g["major_name"], g["major_code"] = mn, mc
+        g["years"].append(y)
+
+    units: dict = {}
+    for key, g in groups.items():
+        by_year = g.pop("_by_year")
+        multi = {}
+        for y in sorted(by_year):
+            slot = by_year[y]
+            n_rows = max(len(slot["ranks"]), len(slot["scores"]), len(slot["codes"]), 1)
+            if n_rows > 1:
+                multi[y] = n_rows
+            if slot["ranks"]:
+                r = int(median(slot["ranks"]))
+                g["ranks"].append(r)
+                g["yearly"].append((y, r))
+                g["rank_years"].add(y)  # A4：有位次的年份（与 n_years 同源）
+            if slot["scores"]:
+                g["scores"][y] = median(slot["scores"])
+        g["years"] = sorted(set(g["years"]))
+        g["multi_unit_years"] = multi
+        units[key] = g
 
     # ---------- 第四步：历史统计 ----------
     # 「最近两个数据年」动态口径：取当前查询结果中最大的两个年份，
@@ -636,6 +803,15 @@ async def _prepare_candidates(
         u["has_both_years"] = (
             len(last_two) == 2 and set(last_two) <= u["rank_years"])
         u["continuous"] = (yrs == list(range(yrs[0], yrs[0] + len(yrs))))
+        # 单调趋势 ≠ 波动：三年门槛逐年同向移动的单元（如中国医科大学临床医学
+        # 9855→12013→16342）跨度天然大，会被高波动规则误捕。实测修好配对键后
+        # 剩余的「高波动」里有 64% 是这种单调序列。趋势要按趋势解释，不能塞进
+        # 「历史规律不可信」的抽屉——见 docs/major-trend-2024-2026.md。
+        seq = [r for _, r in sorted(u["yearly"])]
+        u["monotonic"] = (
+            "松" if len(seq) >= 3 and all(a < b for a, b in zip(seq, seq[1:]))
+            else "紧" if len(seq) >= 3 and all(a > b for a, b in zip(seq, seq[1:]))
+            else None)
         u["break_detected"] = (
             len(ranks) >= 2
             and u["worst_rank"] > u["median_rank"] * cfg["break_multiplier"]
@@ -728,6 +904,107 @@ async def _prepare_candidates(
                 merged.values(),
                 key=lambda d: (str(d["source"]), str(d["major_name"])))
 
+    # ---------- 第四步（补充）：批量关联第五轮学科评估（eval5_a） ----------
+    # 方案 A：匹配页只显示第五轮学科评估（A+/A/A-），替换 major_strength 为 eval5 数据。
+    # 通过 major_eval_map 将标准专业名映射到学科评估学科名，
+    # 再 JOIN school_disciplines 取对应学校在该学科的评估等级。
+    # 无命中时每单元得到空列表，不影响既有契约。
+    for u in units.values():
+        u["major_strength"] = []
+    if ms_codes and ms_names and _ms_ok:
+        try:
+            eval5_rows = await db.fetch_all(
+                """SELECT sd.school_code, m.major_name, sd.grade
+                   FROM school_disciplines sd
+                   JOIN major_eval_map m ON sd.discipline_name = m.eval_discipline
+                   WHERE sd.school_code = ANY(%s)
+                     AND m.major_name = ANY(%s)
+                     AND sd.source = 'eval5_a'
+                     AND sd.verify_status = 'verified'""",
+                (list(ms_codes), list(ms_names)),
+            )
+        except psycopg2.Error as e:
+            if not db.schema_missing(e):
+                raise
+            eval5_rows = []
+        # 按 (school_code, major_name) 索引；catalog_name 优先，major_name 回退
+        eval5_map: dict = {}
+        for sc, mn, grade in eval5_rows:
+            eval5_map[(sc, mn)] = grade
+        for u in units.values():
+            grade = None
+            for nm in (u.get("catalog_name"), u["major_name"]):
+                if nm and (u["school_code"], nm) in eval5_map:
+                    grade = eval5_map[(u["school_code"], nm)]
+                    break
+            if grade:
+                u["major_strength"] = [{
+                    "major_name": u.get("catalog_name") or u["major_name"],
+                    "source": "eval5_a",
+                    "tier": grade,
+                    "data_year": 2022,
+                }]
+
+    # ---------- 第四步（补充）：批量关联专业冷热趋势（migration 0017） ----------
+    # 附加式：不加宽主查询，单独一次批量查询后在内存合并；旧库（未跑 0017）自动
+    # 降级为空，既有匹配零回归。趋势**只改解释与提示，不改分档**——分档的改动是
+    # 配对键修复与稳/冲锚点（见 _build_unit_key 与 _classify），与本段无关。
+    # 用 major_trend_alias 按招生专业名精确匹配：归一规则只写在 ETL 一处
+    # （etl/major_trend_core.py），后端不重复实现，避免两处漂移。
+    trend_ok = await _trend_available()
+    if trend_ok:
+        adm_names = [u["major_name"] for u in units.values() if u["major_name"]]
+        try:
+            trend_rows = await db.fetch_all(
+                """SELECT a.admission_name, t.major_key, t.label, t.label_reason,
+                          t.excess_total, t.n_pairs_2, t.concord_2,
+                          t.units_2024, t.units_2025, t.units_2026,
+                          t.tier_split, t.eq_score_delta, t.eq_score_delta_market,
+                          c.note, c.source_name, c.source_url, c.published_on
+                     FROM major_trend_alias a
+                     JOIN major_trend t
+                       ON t.subject = a.subject AND t.batch = a.batch
+                      AND t.major_key = a.major_key
+                     LEFT JOIN major_trend_context c
+                       ON c.major_key = t.major_key
+                      AND c.subject IN (t.subject, '')
+                    WHERE a.subject = %s AND a.batch = ANY(%s)
+                      AND a.admission_name = ANY(%s)""",
+                (subject, _batch_variants(batch), adm_names),
+            )
+        except psycopg2.Error as e:
+            if not db.schema_missing(e):
+                raise
+            trend_rows = []
+        tmap = {}
+        for (nm, mkey, lab, lreason, ex_tot, n2, conc2,
+             n24, n25, n26, tiers, eqd, eqm,
+             ctx_note, ctx_src, ctx_url, ctx_on) in trend_rows:
+            tmap[nm] = {
+                "major_key": mkey,
+                "label": lab,
+                "label_display": TREND_LABEL_DISPLAY.get(lab, lab),
+                "label_reason": lreason,
+                "excess_total": float(ex_tot) if ex_tot is not None else None,
+                "n_schools": n2,
+                "concord": float(conc2) if conc2 is not None else None,
+                # 供给代理：必须与标签同屏展示。人工智能门槛平稳但单元 +67%（强需求
+                # 吃下扩招），土木工程门槛平稳但单元 −28%（靠缩招撑住），
+                # 只看标签会把两者都读成「没变化」。
+                "units": {"2024": n24, "2025": n25, "2026": n26},
+                "tier_split": tiers,
+                # 面向用户的一线数字：等效分。必须与大盘并列，否则会把全省整体
+                # 漂移误读成该专业自身的变化。
+                "eq_score_delta": float(eqd) if eqd is not None else None,
+                "eq_score_delta_market": float(eqm) if eqm is not None else None,
+                "context": ({"note": ctx_note, "source_name": ctx_src,
+                             "source_url": ctx_url,
+                             "published_on": ctx_on.isoformat() if ctx_on else None}
+                            if ctx_note else None),
+            }
+        for u in units.values():
+            u["major_trend"] = tmap.get(u["major_name"])
+
     # ---------- 第四步之后：构造候选 ----------
     candidates = [_build_candidate(u, rank, cfg) for u in units.values()]
 
@@ -787,6 +1064,10 @@ async def _prepare_candidates(
         c["is_211"] = c.pop("is_211", None)
         c["strength_tags"] = c.pop("strength_tags", [])
         c["major_strength"] = c.pop("major_strength", [])
+        # 0017 新增键，继续追加在末尾
+        c["monotonic"] = c.pop("monotonic", None)
+        c["multi_unit_years"] = c.pop("multi_unit_years", {})
+        c["major_trend"] = c.pop("major_trend", None)
 
     # 应用偏好筛选（省/市/层次/性质/类型/专业关键词/两年均有/排除标记）
     def keep(c):
@@ -820,9 +1101,13 @@ async def _prepare_candidates(
 
 def _risk_at(c: dict, R: int, cfg: dict):
     """同一候选在另一考生位次下重新分档（A3 试算 / P1 区间模式共用）。"""
+    # 投影必须覆盖 _classify 读到的**全部**键：漏掉 last_year_rank 会让
+    # 稳/冲分界（A5）与断崖提示在敏感度试算、区间模式两条路径上静默退化。
     u = {"n_years": c["n_years"], "best_rank": c["best_rank"],
          "worst_rank": c["worst_rank"], "median_rank": c["median_rank"],
-         "span": c["span"], "break_detected": c["break_detected"]}
+         "span": c["span"], "break_detected": c["break_detected"],
+         "last_year_rank": c.get("last_year_rank"),
+         "monotonic": c.get("monotonic")}
     return _classify(u, R, cfg)
 
 
@@ -1130,4 +1415,7 @@ async def match(
         "page": page,
         "page_size": page_size,
         "items": items,
+        # 0017 新增顶层键（追加在末尾）：全省大盘门槛漂移基准，
+        # 前端历年门槛曲线据此画基准线。
+        "market_drift": await get_market_drift(subject, batch),
     }

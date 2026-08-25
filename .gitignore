@@ -42,6 +42,12 @@ etl/enrich_log.jsonl
 etl/enrich_review.jsonl
 *.log
 
+# ============ 内部部署运维文档（含内网账号/主机细节，禁止入库）============
+webapp/docs/EWS_DEPLOY_LESSONS.md
+
+# ============ 设计工具工作目录（可再生，同 .qoder/）============
+.impeccable/
+
 # ============ 系统/编辑器 ============
 .DS_Store
 *.swp

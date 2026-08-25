@@ -2,7 +2,10 @@
 import { ref, onMounted, watch, computed } from 'vue'
 import { useRoute } from 'vue-router'
 import { api } from '@/api/client'
-import type { DataStatusMatrix, CollectionReference, SubjectReqSummary, PagedSubjectReqs } from '@/types'
+import type {
+  DataStatusMatrix, CollectionReference, SubjectReqSummary, PagedSubjectReqs,
+  PagedMajorTrend, MarketDriftRow,
+} from '@/types'
 
 const route = useRoute()
 const meta = ref<any>(null)
@@ -47,6 +50,11 @@ const collFilters = ref({
   rank: null as number | null,
 })
 const collData = ref<CollectionReference | null>(null)
+
+// 专业冷热趋势（0017）：默认看本科批——那是主战场，且专科批「样本不足」占比更高
+const trendFilters = ref({ subject: '', batch: '本科批', label: '', q: '' })
+const trendData = ref<PagedMajorTrend | null>(null)
+const trendMarket = ref<MarketDriftRow[]>([])
 
 // 选科要求三表（D2b）：官方 2027 选考科目要求原样浏览，不参与任何计算
 const XK_TABLE_LABEL: Record<string, string> = { bk: '本科', zk: '专科', jx: '军校' }
@@ -149,6 +157,30 @@ function onTab(tab: string) {
     if (!xkSummary.value) loadXkSummary()
     if (!xkData.value) loadXk()
   }
+  if (tab === 'trend') {
+    if (!trendMarket.value.length) loadTrendMarket()
+    if (!trendData.value) loadTrend(1)
+  }
+}
+
+function loadTrend(page = 1) {
+  return guard(async () => {
+    const f = trendFilters.value
+    trendData.value = await api.majorTrendTable({
+      subject: f.subject || undefined,
+      batch: f.batch || undefined,
+      label: f.label || undefined,
+      q: f.q || undefined,
+      page,
+      page_size: 50,
+    })
+  })
+}
+
+function loadTrendMarket() {
+  return guard(async () => {
+    trendMarket.value = await api.majorTrendMarket()
+  })
 }
 
 // 原始记录：批次下拉按已选科类联动（数据驱动，来自 meta.batches_by_category）。
@@ -280,24 +312,24 @@ function onXkFilter() { xkPage.value = 1; loadXk() }
       <!-- 原始记录 -->
       <el-tab-pane label="原始录取记录" name="records">
         <div class="filters wrap">
-          <el-select v-model="recFilters.year" placeholder="年份" clearable class="f-sel" @change="onRecFilter()">
+          <el-select v-model="recFilters.year" placeholder="年份" aria-label="年份" clearable class="f-sel" @change="onRecFilter()">
             <el-option v-for="y in (meta?.years || [])" :key="y" :label="y" :value="y" />
           </el-select>
-          <el-select v-model="recFilters.category" placeholder="类别" clearable class="f-sel" @change="onRecCategoryChange()">
+          <el-select v-model="recFilters.category" placeholder="类别" aria-label="类别" clearable class="f-sel" @change="onRecCategoryChange()">
             <el-option v-for="c in (meta?.categories || [])" :key="c" :label="c" :value="c" />
           </el-select>
-          <el-select v-model="recFilters.subject" placeholder="学科类" clearable class="f-sel" @change="onRecFilter()">
+          <el-select v-model="recFilters.subject" placeholder="学科类" aria-label="学科类" clearable class="f-sel" @change="onRecFilter()">
             <el-option v-for="s in (meta?.subjects || [])" :key="s" :label="s" :value="s" />
           </el-select>
-          <el-select v-model="recFilters.batch" placeholder="批次" clearable class="f-sel" @change="onRecFilter()">
+          <el-select v-model="recFilters.batch" placeholder="批次" aria-label="批次" clearable class="f-sel" @change="onRecFilter()">
             <el-option v-for="b in recBatchOptions" :key="b" :label="b" :value="b" />
           </el-select>
-          <el-select v-model="recFilters.is_collection" placeholder="志愿类型" clearable class="f-sel" @change="onRecFilter()">
+          <el-select v-model="recFilters.is_collection" placeholder="志愿类型" aria-label="志愿类型" clearable class="f-sel" @change="onRecFilter()">
             <el-option label="常规" :value="false" />
             <el-option label="征集" :value="true" />
           </el-select>
-          <el-input v-model="recFilters.school" placeholder="院校名" clearable class="f-q" @keyup.enter="onRecFilter()" />
-          <el-input v-model="recFilters.major" placeholder="专业名" clearable class="f-q" @keyup.enter="onRecFilter()" />
+          <el-input v-model="recFilters.school" placeholder="院校名" aria-label="院校名" clearable class="f-q" @keyup.enter="onRecFilter()" />
+          <el-input v-model="recFilters.major" placeholder="专业名" aria-label="专业名" clearable class="f-q" @keyup.enter="onRecFilter()" />
           <el-button @click="onRecFilter()">查询</el-button>
           <el-pagination
             v-if="recData"
@@ -416,10 +448,10 @@ function onXkFilter() { xkPage.value = 1; loadXk() }
           <el-select v-model="collFilters.category" class="f-sel" @change="onCollCategoryChange()">
             <el-option v-for="c in (meta?.categories || [])" :key="c" :label="c" :value="c" />
           </el-select>
-          <el-select v-model="collFilters.subject" placeholder="学科类" clearable class="f-sel" @change="loadColl()">
+          <el-select v-model="collFilters.subject" placeholder="学科类" aria-label="学科类" clearable class="f-sel" @change="loadColl()">
             <el-option v-for="s in (meta?.subjects || [])" :key="s" :label="s" :value="s" />
           </el-select>
-          <el-select v-model="collFilters.batch" placeholder="批次" clearable class="f-sel" @change="loadColl()">
+          <el-select v-model="collFilters.batch" placeholder="批次" aria-label="批次" clearable class="f-sel" @change="loadColl()">
             <el-option v-for="b in collBatchOptions" :key="b" :label="b" :value="b" />
           </el-select>
           <el-input
@@ -427,6 +459,7 @@ function onXkFilter() { xkPage.value = 1; loadXk() }
             type="number"
             :min="1"
             placeholder="你的位次（可选）"
+            aria-label="你的位次"
             clearable
             class="f-q"
             @keyup.enter="loadColl()"
@@ -454,6 +487,108 @@ function onXkFilter() { xkPage.value = 1; loadXk() }
         </el-table>
       </el-tab-pane>
 
+      <!-- 专业冷热趋势（migration 0017）：方法、阈值、自检与全量表，对应「可解释可溯源」原则 -->
+      <el-tab-pane label="专业冷热趋势" name="trend">
+        <el-alert type="info" :closable="false" show-icon class="coll-alert"
+          title="趋势说明的是「历史最难年还值不值得当参考」，不是报考建议。三年数据只给出两个年段，不用于预测明年门槛；不覆盖艺术类、体育类与提前批（含公费师范/公安/军校）。" />
+
+        <div class="tr-method">
+          <h4 class="tr-h">怎么算出来的</h4>
+          <ol class="tr-ol">
+            <li><b>位次先百分位化</b>：门槛位次 ÷ 当年该学科类考生总数。辽宁 2025 历史类考生比 2024 年多 29.3%，同一个位次在两年里含金量完全不同，直接比会得出错误结论。</li>
+            <li><b>同单元跨年配对</b>：以「院校 + 规范化专业名 + 批次」为身份逐年对照。<b>不用省内专业代码</b>——它是逐年重排的顺序号，按代码归并会把不同专业接成一条时间线。</li>
+            <li><b>扣掉全省大盘漂移</b>：每个「学科类 × 批次 × 年段」取全部配对单元变动的中位数作基准，只谈超出基准的部分。不扣的话几乎所有专业都会被误判成在变松。</li>
+            <li><b>阈值由数据自己给</b>：把该格子全部单元的超额漂移打散，随机抽 n 个算中位数、重复 2 万次得到零分布，取双侧 95% 分位作为该 n 下的显著性门槛。开设院校越少，阈值越高——避免小专业被噪声误判成趋势。</li>
+            <li><b>趋势 vs 大小年看方向一致性</b>：两个年段同向且都显著才算「连降/连升两年」；一升一降是「大小年波动」；只有一段显著是「近一年跳变」。</li>
+          </ol>
+          <p class="tr-p">
+            <b>自检</b>：把专业标签随机打乱后用同一套判据重跑，529 个可判定专业中被判「持续趋势」的有
+            <b>0 个</b>；真实数据是 320 个可判定专业中 61 个（19%）。信号与噪声分离干净。
+          </p>
+          <p class="tr-p tr-p--muted">
+            局限：① 三年只有两个年段，趋势判断置信度有限；② 招生计划人数尚未入库，只能用「在辽招生单元数」做供给代理；
+            ③ 2024–2026 的选科要求变化无法核查；④ 结论只适用于辽宁。
+          </p>
+        </div>
+
+        <div v-if="trendMarket.length" class="tr-method">
+          <h4 class="tr-h">全省大盘漂移基准（趋势口径的分母）</h4>
+          <el-table :data="trendMarket" size="small" border fit>
+            <el-table-column prop="subject" label="学科类" width="110" />
+            <el-table-column prop="batch" label="批次" width="90" />
+            <el-table-column label="年段" width="120">
+              <template #default="{ row }">{{ row.year_from }} → {{ row.year_to }}</template>
+            </el-table-column>
+            <el-table-column label="整体门槛变动" min-width="140" align="right">
+              <template #default="{ row }">
+                <span class="tnum">{{ ((Math.exp(row.drift_log) - 1) * 100).toFixed(1) }}%</span>
+                <span class="tr-m">（正 = 整体变松）</span>
+              </template>
+            </el-table-column>
+          </el-table>
+        </div>
+
+        <div class="filters wrap">
+          <el-select v-model="trendFilters.subject" placeholder="学科类" aria-label="学科类" clearable class="f-sel" @change="loadTrend(1)">
+            <el-option label="物理学科类" value="物理学科类" />
+            <el-option label="历史学科类" value="历史学科类" />
+          </el-select>
+          <el-select v-model="trendFilters.batch" placeholder="批次" aria-label="批次" clearable class="f-sel" @change="loadTrend(1)">
+            <el-option label="本科批" value="本科批" />
+            <el-option label="专科批" value="专科批" />
+          </el-select>
+          <el-select v-model="trendFilters.label" placeholder="趋势标签" aria-label="趋势标签" clearable class="f-sel" @change="loadTrend(1)">
+            <el-option v-for="d in (meta?.trend_dictionary || [])" :key="d.label" :label="d.display" :value="d.label" />
+          </el-select>
+          <el-input v-model="trendFilters.q" placeholder="专业名关键词" aria-label="专业名关键词" clearable class="f-q" @keyup.enter="loadTrend(1)" />
+          <el-button type="primary" @click="loadTrend(1)">查询</el-button>
+        </div>
+
+        <div v-if="trendData?.unavailable" class="empty">趋势数据尚未入库（需执行 migration 0017 + etl/load_major_trend.py）。</div>
+        <el-table v-else-if="trendData" :data="trendData.items" size="small" border fit>
+          <el-table-column prop="major_key" label="专业" min-width="150" show-overflow-tooltip />
+          <el-table-column prop="subject" label="学科类" width="100" />
+          <el-table-column prop="batch" label="批次" width="85" />
+          <el-table-column label="趋势" width="140">
+            <template #default="{ row }">
+              {{ (meta?.trend_dictionary || []).find((d) => d.label === row.label)?.display || row.label }}
+            </template>
+          </el-table-column>
+          <el-table-column label="等效分变化" width="150" align="right">
+            <template #default="{ row }">
+              <span v-if="row.eq_score_delta != null" class="tnum">
+                {{ row.eq_score_delta > 0 ? '+' : '' }}{{ row.eq_score_delta }} 分
+              </span>
+              <span v-if="row.eq_score_delta_market != null" class="tr-m">
+                （大盘 {{ row.eq_score_delta_market > 0 ? '+' : '' }}{{ row.eq_score_delta_market }}）
+              </span>
+            </template>
+          </el-table-column>
+          <el-table-column label="院校数" width="80" align="right">
+            <template #default="{ row }"><span class="tnum">{{ row.n_pairs_2 ?? row.n_pairs_1 ?? '—' }}</span></template>
+          </el-table-column>
+          <el-table-column label="同向率" width="85" align="right">
+            <template #default="{ row }">
+              <span v-if="row.concord_2 != null" class="tnum">{{ Math.round(row.concord_2 * 100) }}%</span>
+            </template>
+          </el-table-column>
+          <el-table-column label="在辽招生单元" min-width="140" align="right">
+            <template #default="{ row }">
+              <span class="tnum">{{ row.units[2024] }} → {{ row.units[2025] }} → {{ row.units[2026] }}</span>
+            </template>
+          </el-table-column>
+        </el-table>
+        <el-pagination
+          v-if="trendData && trendData.total > trendData.page_size"
+          class="pager"
+          layout="prev, pager, next, total"
+          :current-page="trendData.page"
+          :page-size="trendData.page_size"
+          :total="trendData.total"
+          @current-change="loadTrend"
+        />
+      </el-tab-pane>
+
       <!-- 选科要求三表（D2b）：官方 2027 选考科目要求原样浏览 -->
       <el-tab-pane label="选科要求" name="xk">
         <el-alert
@@ -471,21 +606,21 @@ function onXkFilter() { xkPage.value = 1; loadXk() }
           </span>
         </div>
         <div class="filters wrap">
-          <el-select v-model="xkFilters.year" placeholder="年份" clearable class="f-sel" @change="onXkFilter()">
+          <el-select v-model="xkFilters.year" placeholder="年份" aria-label="年份" clearable class="f-sel" @change="onXkFilter()">
             <el-option v-for="y in xkYears" :key="y" :label="y" :value="y" />
           </el-select>
-          <el-select v-model="xkFilters.table" placeholder="表类型" clearable class="f-sel" @change="onXkFilter()">
+          <el-select v-model="xkFilters.table" placeholder="表类型" aria-label="表类型" clearable class="f-sel" @change="onXkFilter()">
             <el-option label="本科（bk）" value="bk" />
             <el-option label="专科（zk）" value="zk" />
             <el-option label="军校（jx）" value="jx" />
           </el-select>
-          <el-select v-model="xkFilters.first_req" placeholder="首选要求" clearable class="f-sel" @change="onXkFilter()">
+          <el-select v-model="xkFilters.first_req" placeholder="首选要求" aria-label="首选要求" clearable class="f-sel" @change="onXkFilter()">
             <el-option label="物理" value="物理" />
             <el-option label="历史" value="历史" />
             <el-option label="不限" value="不限" />
           </el-select>
-          <el-input v-model="xkFilters.school" placeholder="院校名" clearable class="f-q" @keyup.enter="onXkFilter()" />
-          <el-input v-model="xkFilters.major" placeholder="专业名" clearable class="f-q" @keyup.enter="onXkFilter()" />
+          <el-input v-model="xkFilters.school" placeholder="院校名" aria-label="院校名" clearable class="f-q" @keyup.enter="onXkFilter()" />
+          <el-input v-model="xkFilters.major" placeholder="专业名" aria-label="专业名" clearable class="f-q" @keyup.enter="onXkFilter()" />
           <el-button @click="onXkFilter()">查询</el-button>
           <el-pagination
             v-if="xkData"
@@ -527,6 +662,13 @@ function onXkFilter() { xkPage.value = 1; loadXk() }
 </template>
 
 <style scoped>
+.tr-method { margin-bottom: var(--space-4); }
+.tr-h { font-size: var(--text-sm); font-weight: 600; margin: 0 0 var(--space-2); color: var(--color-text); }
+.tr-ol { margin: 0 0 var(--space-2); padding-left: 1.3em; color: var(--color-text-secondary); font-size: var(--text-sm); line-height: 1.8; }
+.tr-p { margin: 0 0 var(--space-2); color: var(--color-text-secondary); font-size: var(--text-sm); line-height: 1.7; }
+.tr-p--muted { color: var(--color-text-muted); font-size: var(--text-xs); }
+.tr-m { font-size: var(--text-xs); color: var(--color-text-muted); margin-left: 4px; }
+
 .lib-eyebrow { display: inline-flex; align-items: center; gap: var(--space-2); font-size: var(--text-xs); color: var(--color-text-muted); margin-bottom: var(--space-2); }
 .lib-eyebrow__dot { width: 6px; height: 6px; border-radius: 50%; background: var(--color-text-muted); }
 .page__title { font-size: var(--text-2xl); }
@@ -548,4 +690,11 @@ function onXkFilter() { xkPage.value = 1; loadXk() }
 .dim { color: var(--color-text-muted); }
 :deep(.matrix-gap) td { background: var(--el-color-danger-light-9) !important; }
 .empty { padding: var(--space-8); text-align: center; color: var(--color-text-muted); }
+
+/* 移动端优先（PRODUCT.md 硬要求）：筛选栏改单列堆叠 */
+@media (max-width: 640px) {
+  .filters { flex-direction: column; align-items: stretch; }
+  .f-sel, .f-q { width: 100%; }
+  .pg { margin-left: 0; }
+}
 </style>

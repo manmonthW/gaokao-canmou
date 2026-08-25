@@ -99,7 +99,7 @@ function go(to: string) {
     <!-- 当前步引导语 + 主行动 -->
     <div class="guide__lead">
       <div class="guide__lead-text">
-        <span class="guide__lead-title">{{ lead.title }}</span>
+        <h1 class="guide__lead-title">{{ lead.title }}</h1>
         <span class="guide__lead-hint">{{ lead.hint }}</span>
       </div>
       <el-button v-if="lead.show && lead.cta" type="primary" size="large" @click="go(lead.to)">
@@ -184,7 +184,7 @@ function go(to: string) {
   border-top: 1px dashed var(--color-border-strong);
 }
 .guide__lead-text { display: flex; flex-direction: column; gap: var(--space-1); }
-.guide__lead-title { font-size: var(--text-xl); font-weight: 700; color: var(--color-text); }
+.guide__lead-title { margin: 0; font-size: var(--text-xl); font-weight: 700; color: var(--color-text); }
 .guide__lead-hint { font-size: var(--text-sm); color: var(--color-text-secondary); }
 
 @media (max-width: 640px) {

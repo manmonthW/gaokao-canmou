@@ -90,9 +90,9 @@ function goWorkbench() {
   border-radius: 999px;
   font-variant-numeric: tabular-nums;
 }
-.basket__chip--reach { background: var(--color-reach-soft); color: var(--color-reach); }
-.basket__chip--match { background: var(--color-match-soft); color: var(--color-match); }
-.basket__chip--safe { background: var(--color-safe-soft); color: var(--color-safe); }
+.basket__chip--reach { background: var(--color-reach-soft); color: var(--color-reach-text); }
+.basket__chip--match { background: var(--color-match-soft); color: var(--color-match-text); }
+.basket__chip--safe { background: var(--color-safe-soft); color: var(--color-safe-text); }
 .basket__fav { color: var(--color-text-muted); }
 
 .basket-enter-active,

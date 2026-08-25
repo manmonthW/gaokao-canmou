@@ -55,6 +55,8 @@ export interface MetaResponse {
   major_flags: MajorFlagDef[]
   /** 院校/专业实力标签词表（任务 #9，migration 0014）；旧后端无此键时为 undefined */
   strength_dictionary?: StrengthTagDef[]
+  /** 专业冷热趋势词表（migration 0017；新键追加在末尾） */
+  trend_dictionary?: TrendTagDef[]
 }
 
 /** 专业级报考标记词表（D2a）：后端 flag_dictionary */
@@ -215,6 +217,8 @@ export interface MajorCatalogItem {
   lowest_score_range: [number | null, number | null]
   lowest_rank_range: [number | null, number | null]
   has_admission: boolean
+  /** 本科批的持续趋势标签（仅用于列表徽标；平稳/样本不足不下发） */
+  trend_labels?: { subject: string; label: string; label_display: string }[]
 }
 
 export interface HotProfile {
@@ -246,6 +250,93 @@ export interface MajorDetail {
   discipline: string
   hot_profile: HotProfile | null
   eval5: MajorEval5
+  /** 冷热趋势，按学科类×批次分组；不跨学科类合并（同一专业两个学科类可能结论相反） */
+  trend?: MajorTrend[]
+}
+
+
+/** 专业冷热趋势（migration 0017）。
+ *  符号约定：eq_score_delta 为负 = 门槛降了多少分（更好考），这是给用户看的一线口径；
+ *  excess_total 为**正**才表示「相对全省变松」，方向与直觉相反，不要直接展示。 */
+export interface MajorTrend {
+  major_key?: string
+  subject?: string
+  batch?: string
+  label: string
+  label_display: string
+  label_reason: string | null
+  excess_total: number | null
+  n_schools: number | null
+  concord: number | null
+  /** 在辽招生单元数。必须与标签同屏展示：门槛「平稳」在扩招 67% 与缩招 28% 下含义完全不同 */
+  units: { 2024: number; 2025: number; 2026: number }
+  tier_split: Record<string, { n: number; e: number }> | null
+  /** 等效分变化：把各年门槛位次都换算到最新年分数尺再相减，负=门槛降了多少分 */
+  eq_score_delta: number | null
+  /** 同期全省大盘等效分变化。必须与上一项并列，否则会把大盘漂移误读成该专业自身的变化 */
+  eq_score_delta_market: number | null
+  /** 社会背景解读：人工撰写、非本站数据，强制带来源与日期 */
+  context: {
+    note: string
+    source_name: string
+    source_url: string
+    published_on: string | null
+  } | null
+}
+
+/** 趋势词表（/meta.trend_dictionary）：文案集中在后端，前端不硬编码 */
+export interface TrendTagDef {
+  label: string
+  display: string
+  glyph: string
+  confidence: 'high' | 'low' | 'none'
+  /** 是否进表格徽标。平稳/样本不足为 false——数据为空不渲染、不占位 */
+  badge: boolean
+  tip: string
+}
+
+/** 数据中心趋势全量表一行 */
+export interface MajorTrendRow {
+  subject: string
+  batch: string
+  major_key: string
+  label: string
+  label_reason: string | null
+  n_pairs_1: number | null
+  excess_1: number | null
+  thr_1: number | null
+  concord_1: number | null
+  n_pairs_2: number | null
+  excess_2: number | null
+  thr_2: number | null
+  concord_2: number | null
+  excess_total: number | null
+  units: { 2024: number; 2025: number; 2026: number }
+  eq_score_delta: number | null
+  eq_score_delta_market: number | null
+}
+
+export interface PagedMajorTrend {
+  total: number
+  page: number
+  page_size: number
+  items: MajorTrendRow[]
+  unavailable?: boolean
+}
+
+export interface MarketDriftRow {
+  subject: string
+  batch: string
+  year_from: number
+  year_to: number
+  drift_log: number
+}
+
+/** 全省大盘门槛漂移基准，供历年门槛曲线叠加基准线 */
+export interface MarketDrift {
+  year_from: number
+  year_to: number
+  drift_log: number
 }
 
 export interface CityProfile {
@@ -603,6 +694,13 @@ export interface MatchCandidate {
   strength_tags?: string[]
   /** 专业实力（任务 #9）：国/省一流专业、软科评级等；空数组=暂无收录 */
   major_strength?: MajorStrengthItem[]
+  /** 三年门槛是否单向移动（"松"=逐年变松 / "紧"=逐年变紧 / null=非单调）。
+   *  单调是趋势不是波动，不进「高波动」档 */
+  monotonic?: '松' | '紧' | null
+  /** 当年该院校该专业的招生单元数（含定向等）；>1 说明门槛取的是当年中位 */
+  multi_unit_years?: Record<string, number>
+  /** 专业冷热趋势（migration 0017）；旧库为 null */
+  major_trend?: MajorTrend | null
 }
 
 export interface MatchFacetItem {
@@ -662,6 +760,8 @@ export interface MatchResponse {
   page_size: number
   items: MatchCandidate[]
   batch_context?: BatchContext
+  /** 全省大盘门槛漂移基准（0017），供历年门槛曲线叠加基准线 */
+  market_drift?: MarketDrift[]
   classification_note?: ClassificationNote
   excluded_by_subject?: number
   /** 首选不符排除数（无条件生效） */
@@ -798,6 +898,8 @@ export interface CandidateSnapshot {
   data_version: string | null
   examinee_rank: number | null
   saved_at: string
+  /** 所属专业的冷热趋势标签（0017）；旧快照为 undefined */
+  trend_label?: string | null
 }
 
 export interface PlanEntry extends CandidateSnapshot {

@@ -67,6 +67,8 @@ import type {
   PagedScoreRank,
   PagedRecords,
   SourceFile,
+  PagedMajorTrend,
+  MarketDriftRow,
   PublicationStatus,
   CollectionReference,
   SubjectReqSummary,
@@ -127,6 +129,10 @@ export const api = {
   records: (p: Record<string, unknown>) =>
     getJson<PagedRecords>(`/datacenter/records${buildQuery(p)}`),
   sourceFiles: () => getJson<SourceFile[]>('/datacenter/source-files'),
+  majorTrendTable: (p: Record<string, unknown>) =>
+    getJson<PagedMajorTrend>(`/datacenter/major-trend${buildQuery(p)}`),
+  majorTrendMarket: () =>
+    getJson<MarketDriftRow[]>('/datacenter/major-trend/market'),
   publicationStatus: () => getJson<PublicationStatus[]>('/datacenter/publication-status'),
   // P6 往年征集参考（最坏情况安全网，不参与智能匹配）
   collectionReference: (p: Record<string, unknown>) =>

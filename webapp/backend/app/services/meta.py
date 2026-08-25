@@ -2,6 +2,7 @@
 import psycopg2
 
 from app import db
+from app.services.match import TREND_DICTIONARY
 
 
 async def get_meta():
@@ -85,4 +86,8 @@ async def get_meta():
              "source_note": r[4], "display_order": r[5]}
             for r in strength_tag_rows
         ],
+        # 专业冷热趋势词表（migration 0017；新增键，既有字段不动）。
+        # 文案集中在后端，前端不硬编码——口吻是**中性事实陈述**，不用「降温/好考」
+        # 这类带价值判断的词：趋势说明的是「历史最难年还值不值得当参考」，不是报考建议。
+        "trend_dictionary": TREND_DICTIONARY,
     }

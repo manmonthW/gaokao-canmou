@@ -1,6 +1,8 @@
 """数据中心服务：省控线、一分一段、原始录取记录、源文件、批次发布状态、选科要求。"""
 import re
 
+import psycopg2
+
 from app import db
 from app.config import MAX_PAGE_SIZE
 
@@ -250,3 +252,78 @@ async def subject_requirements(year=None, table=None, school=None, major=None,
             for r in rows
         ],
     }
+
+
+async def major_trend(*, subject=None, batch=None, label=None, q=None,
+                      page=1, page_size=50):
+    """专业冷热趋势全量表（migration 0017），供数据中心透明展示。
+
+    默认按「两段合计超额漂移」的绝对值降序——把移动最剧烈的专业顶上来，
+    这是用户最想先看到的；「样本不足」永远排最后。
+    """
+    where, params = ["1=1"], []
+    if subject:
+        where.append("t.subject = %s")
+        params.append(subject)
+    if batch:
+        where.append("t.batch = %s")
+        params.append(batch)
+    if label:
+        where.append("t.label = %s")
+        params.append(label)
+    if q:
+        where.append("t.major_key ILIKE %s")
+        params.append(f"%{q}%")
+    w = " AND ".join(where)
+    try:
+        total = await db.fetch_one(
+            f"SELECT count(*) FROM major_trend t WHERE {w}", params)
+    except psycopg2.Error as e:
+        if not db.schema_missing(e):
+            raise
+        return {"total": 0, "page": page, "page_size": page_size, "items": [],
+                "unavailable": True}
+    total = total[0] if total else 0
+    rows = await db.fetch_all(
+        f"""SELECT t.subject, t.batch, t.major_key, t.label, t.label_reason,
+                   t.n_pairs_1, t.excess_1, t.thr_1, t.concord_1,
+                   t.n_pairs_2, t.excess_2, t.thr_2, t.concord_2,
+                   t.excess_total, t.units_2024, t.units_2025, t.units_2026,
+                   t.eq_score_delta, t.eq_score_delta_market
+              FROM major_trend t WHERE {w}
+             ORDER BY (t.label = '样本不足'),
+                      abs(coalesce(t.excess_total, 0)) DESC,
+                      t.major_key
+             LIMIT %s OFFSET %s""",
+        params + [page_size, (page - 1) * page_size],
+    )
+    f = lambda v: float(v) if v is not None else None       # noqa: E731
+    return {
+        "total": total, "page": page, "page_size": page_size,
+        "items": [
+            {"subject": r[0], "batch": r[1], "major_key": r[2],
+             "label": r[3], "label_reason": r[4],
+             "n_pairs_1": r[5], "excess_1": f(r[6]), "thr_1": f(r[7]),
+             "concord_1": f(r[8]),
+             "n_pairs_2": r[9], "excess_2": f(r[10]), "thr_2": f(r[11]),
+             "concord_2": f(r[12]),
+             "excess_total": f(r[13]),
+             "units": {"2024": r[14], "2025": r[15], "2026": r[16]},
+             "eq_score_delta": f(r[17]), "eq_score_delta_market": f(r[18])}
+            for r in rows
+        ],
+    }
+
+
+async def major_trend_market():
+    """全省大盘门槛漂移基准（各学科类×批次×年段）。"""
+    try:
+        rows = await db.fetch_all(
+            """SELECT subject, batch, year_from, year_to, drift_log
+                 FROM major_trend_market ORDER BY subject, batch, year_from""")
+    except psycopg2.Error as e:
+        if not db.schema_missing(e):
+            raise
+        return []
+    return [{"subject": a, "batch": b, "year_from": c, "year_to": d,
+             "drift_log": float(e)} for a, b, c, d, e in rows]

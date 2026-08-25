@@ -104,6 +104,7 @@ onMounted(() => {
     <el-input
       v-model="q"
       placeholder="输入院校名称或代码，如：大连理工"
+      aria-label="输入院校名称或代码"
       clearable
       class="search"
       @keyup.enter="onSearch"
@@ -125,7 +126,11 @@ onMounted(() => {
         :key="s.code"
         class="school"
         shadow="hover"
+        role="button"
+        tabindex="0"
         @click="open(s.code)"
+        @keydown.enter="open(s.code)"
+        @keydown.space.prevent="open(s.code)"
       >
         <div class="school__name">{{ s.name }}</div>
         <div class="school__meta">
@@ -176,7 +181,11 @@ onMounted(() => {
           :key="s.name"
           class="hot__card"
           shadow="hover"
+          role="button"
+          tabindex="0"
           @click="openHot(s)"
+          @keydown.enter="openHot(s)"
+          @keydown.space.prevent="openHot(s)"
         >
           <div class="hot__card-name">{{ s.name }}</div>
           <div class="hot__card-tags">
@@ -316,6 +325,7 @@ onMounted(() => {
 .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: var(--space-4); }
 .school { cursor: pointer; border-radius: var(--radius-lg); transition: transform 0.12s; }
 .school:hover { transform: translateY(-2px); }
+.school:focus-visible { outline: 2px solid var(--color-primary); outline-offset: 2px; }
 .school__name { font-weight: 600; font-size: var(--text-base); margin-bottom: var(--space-2); }
 .school__meta { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); }
 .school__dim { color: var(--color-text-muted); font-size: var(--text-xs); }
@@ -343,6 +353,7 @@ onMounted(() => {
 .hot__grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: var(--space-4); min-height: 120px; }
 .hot__card { cursor: pointer; border-radius: var(--radius-lg); transition: transform 0.12s; }
 .hot__card:hover { transform: translateY(-2px); }
+.hot__card:focus-visible { outline: 2px solid var(--color-primary); outline-offset: 2px; }
 .hot__card-name { font-weight: 600; font-size: var(--text-base); margin-bottom: var(--space-2); }
 .hot__card-tags { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: var(--space-2); }
 .hot__card-meta { display: flex; flex-wrap: wrap; gap: var(--space-2); }

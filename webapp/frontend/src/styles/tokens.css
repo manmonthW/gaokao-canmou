@@ -19,22 +19,34 @@
 
   /* 背景与边框 */
   --color-bg: #f6f9fc;
+  --color-bg-subtle: #f7f9fc; /* 卡片内嵌套区块的浅底色（表头、说明块），比 --color-bg 更贴近白 */
   --color-surface: #ffffff;
   --color-border: #e3e8ee;
   --color-border-strong: #d5dbe3;
 
-  /* 语义色（风险标签） */
-  --color-reach: #f5a623;      /* 冲（有风险，琥珀） */
+  /* 语义色（风险标签：冲/稳/保/高波动/数据不足，五档语义严格绑定，不与
+     Element Plus 通用 success/primary/warning/danger/info 混用——见 DESIGN.md
+     「The Two Palettes Rule」） */
+  --color-reach: #f5a623;      /* 冲（有风险，琥珀）—— 用于图标/描边/圆点 */
   --color-reach-soft: #fdf3e2;
-  --color-match: #1bb978;      /* 稳（绿） */
+  --color-reach-text: #925d07; /* 冲 · 压在 -soft 底色上的文字色，5.0:1，WCAG AA */
+  --color-match: #1bb978;      /* 稳（绿）—— 用于图标/描边/圆点 */
   --color-match-soft: #e7f8f0;
-  --color-safe: #2563eb;       /* 保（蓝） */
+  --color-match-text: #127b50; /* 稳 · 压在 -soft 底色上的文字色，4.8:1，WCAG AA */
+  --color-safe: #2563eb;       /* 保（蓝）—— 与主色同色相 */
   --color-safe-soft: #eef4ff;
-  --color-volatile: #7a5af8;   /* 高波动（紫） */
+  --color-safe-text: #2563eb;  /* 保 · 4.7:1，已达标，与 --color-safe 相同 */
+  --color-volatile: #7a5af8;   /* 高波动（紫）—— 用于图标/描边/圆点 */
   --color-volatile-soft: #f1edff;
-  --color-insufficient: #8792a2;/* 数据不足（灰） */
+  --color-volatile-text: #6642f7; /* 高波动 · 压在 -soft 底色上的文字色，5.0:1 */
+  --color-insufficient: #8792a2;/* 数据不足（灰）—— 用于图标/描边/圆点 */
   --color-insufficient-soft: #eef1f4;
-  --color-danger: #e25950;
+  --color-insufficient-text: #5e6979; /* 数据不足 · 压在 -soft 底色上的文字色，4.9:1 */
+  --color-danger: #e25950;     /* 仅用于硬错误/危险状态，不用于风险分类五色 */
+
+  /* 装饰性强调色：官方文件/PDF 类标签，与 --color-danger 语义无关，不表示错误 */
+  --color-doc-accent: #d93026;
+  --color-doc-accent-soft: rgba(217, 48, 38, 0.08);
 
   /* 圆角 */
   --radius-sm: 6px;

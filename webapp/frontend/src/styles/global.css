@@ -37,3 +37,24 @@ a {
   --el-border-radius-base: var(--radius-md);
   --el-font-family: var(--font-sans);
 }
+
+/* 风险分类徽章（冲/稳/保/高波动/数据不足）—— 全站共享的唯一正确写法。
+   不用 el-tag 的 type 属性（那绑定的是 Element Plus 自己的 success/primary/
+   warning/danger/info 调色板），直接用五个风险 token，保证同一档在任何
+   页面渲染出同一种颜色。见 DESIGN.md「The Two Palettes Rule」。
+   文字色用 -text 变体（在各自 soft 底色上均 ≥4.5:1，WCAG AA）。 */
+.risk-tag {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 9px;
+  border-radius: 999px;
+  font-size: var(--text-xs);
+  font-weight: 600;
+  line-height: 1.7;
+  white-space: nowrap;
+}
+.risk-tag--reach { background: var(--color-reach-soft); color: var(--color-reach-text); }
+.risk-tag--match { background: var(--color-match-soft); color: var(--color-match-text); }
+.risk-tag--safe { background: var(--color-safe-soft); color: var(--color-safe-text); }
+.risk-tag--volatile { background: var(--color-volatile-soft); color: var(--color-volatile-text); }
+.risk-tag--insufficient { background: var(--color-insufficient-soft); color: var(--color-insufficient-text); }

@@ -88,3 +88,21 @@ async def subject_requirements(year: Optional[int] = Query(None),
                                           school=school, major=major,
                                           first_req=first_req,
                                           page=page, page_size=page_size)
+
+
+@router.get("/major-trend")
+async def major_trend(subject: Optional[str] = Query(None),
+                      batch: Optional[str] = Query(None),
+                      label: Optional[str] = Query(None),
+                      q: Optional[str] = Query(None, description="专业名关键词"),
+                      page: int = Query(1, ge=1),
+                      page_size: int = Query(50, ge=1, le=500)):
+    """专业冷热趋势全量表（migration 0017），分页可筛选。"""
+    return await svc.major_trend(subject=subject, batch=batch, label=label,
+                                 q=q, page=page, page_size=page_size)
+
+
+@router.get("/major-trend/market")
+async def major_trend_market():
+    """全省大盘门槛漂移基准（趋势口径的分母）。"""
+    return await svc.major_trend_market()

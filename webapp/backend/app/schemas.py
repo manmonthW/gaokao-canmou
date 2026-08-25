@@ -55,3 +55,5 @@ class MetaResponse(BaseModel):
     major_flags: List[dict] = []
     # 院校/专业实力标签词表（任务 #8，migration 0014；新增键，既有字段不动）
     strength_dictionary: List[dict] = []
+    # 专业冷热趋势词表（migration 0017；新增键一律追加在末尾）
+    trend_dictionary: List[dict] = []

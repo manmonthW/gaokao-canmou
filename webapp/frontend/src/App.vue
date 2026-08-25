@@ -59,7 +59,7 @@ const library = [
     to: '/guides',
     label: '报考说明',
     icon: 'guide',
-    style: '--icon: #d93026; --icon-soft: rgba(217, 48, 38, 0.08)',
+    style: '--icon: var(--color-doc-accent); --icon-soft: var(--color-doc-accent-soft)',
   },
   {
     to: '/search/school',
@@ -283,6 +283,7 @@ const chromeless = computed(() => route.meta.public === true)
 /* ---- 账号状态 ---- */
 .acct { display: flex; align-items: center; }
 .acct__user { display: flex; align-items: center; gap: var(--space-2); cursor: pointer; outline: none; }
+.acct__user:focus-visible { outline: 2px solid var(--color-primary); outline-offset: 2px; }
 .acct__avatar {
   width: 28px; height: 28px; border-radius: 50%;
   background: var(--color-primary); color: #fff;
@@ -400,5 +401,10 @@ const chromeless = computed(() => route.meta.public === true)
   .lib-nav {
     margin-left: 0;
   }
+}
+/* 触控输入设备（不只是窄屏），按 adapt.md 建议用 pointer:coarse 检测加大热区 */
+@media (max-width: 640px), (pointer: coarse) {
+  .lib-btn { min-height: 44px; }
+  .acct__user { min-height: 44px; padding: 4px; }
 }
 </style>

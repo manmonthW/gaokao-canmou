@@ -2,6 +2,7 @@
 import { ref, onMounted, computed } from 'vue'
 import { useRouter } from 'vue-router'
 import { api } from '@/api/client'
+import TrendBadge from '@/components/TrendBadge.vue'
 import MajorDrawer from '@/components/MajorDrawer.vue'
 import type {
   CatalogDiscipline,
@@ -150,22 +151,24 @@ async function onScoreSearch() {
         <div class="catalog">
           <!-- 左侧门类导航 -->
           <aside class="disc-nav">
-            <div
+            <button
+              type="button"
               class="disc-nav__item"
               :class="{ 'is-active': activeDiscipline === null }"
               @click="selectDiscipline(null)"
             >
               全部专业 <span class="disc-nav__cnt">{{ disciplines.reduce((a, b) => a + b.count, 0) }}</span>
-            </div>
-            <div
+            </button>
+            <button
               v-for="d in disciplines"
               :key="d.discipline"
+              type="button"
               class="disc-nav__item"
               :class="{ 'is-active': activeDiscipline === d.discipline }"
               @click="selectDiscipline(d.discipline)"
             >
               {{ d.discipline }} <span class="disc-nav__cnt">{{ d.count }}</span>
-            </div>
+            </button>
           </aside>
 
           <!-- 右侧内容 -->
@@ -174,11 +177,12 @@ async function onScoreSearch() {
               <el-input
                 v-model="catalogQ"
                 placeholder="搜专业名称，如：计算机 / 临床"
+                aria-label="搜专业名称"
                 clearable
                 class="f-q"
                 @keyup.enter="runCatalogSearch"
               />
-              <el-select v-model="activeCategory" placeholder="专业类" clearable class="f-sel" @change="runCatalogSearch">
+              <el-select v-model="activeCategory" placeholder="专业类" aria-label="专业类" clearable class="f-sel" @change="runCatalogSearch">
                 <el-option v-for="c in filteredCategories" :key="c.category" :label="c.category" :value="c.category" />
               </el-select>
               <el-button type="primary" :loading="catalogLoading" @click="runCatalogSearch">搜索</el-button>
@@ -193,8 +197,16 @@ async function onScoreSearch() {
               <el-table-column label="专业" min-width="200">
                 <template #default="{ row }">
                   <div class="major-cell">
-                    <a class="major-cell__name link" @click="openDetail(row.name)">{{ row.name }}</a>
-                    <span class="major-cell__cat">{{ row.category }}</span>
+                    <button type="button" class="major-cell__name link" @click="openDetail(row.name)">{{ row.name }}</button>
+                    <span class="major-cell__cat">
+                      {{ row.category }}
+                      <TrendBadge
+                        v-for="t in (row.trend_labels || [])"
+                        :key="t.subject"
+                        :trend="t"
+                        compact
+                      />
+                    </span>
                   </div>
                 </template>
               </el-table-column>
@@ -224,11 +236,11 @@ async function onScoreSearch() {
       <!-- ============ Tab2: 分数查询 ============ -->
       <el-tab-pane label="分数查询" name="score">
         <div class="filters">
-          <el-input v-model="scoreQ" placeholder="输入招生专业名，如：计算机" clearable class="f-q" @keyup.enter="onScoreSearch" />
-          <el-select v-model="scoreYear" placeholder="年份" clearable class="f-sel">
+          <el-input v-model="scoreQ" placeholder="输入招生专业名，如：计算机" aria-label="输入招生专业名" clearable class="f-q" @keyup.enter="onScoreSearch" />
+          <el-select v-model="scoreYear" placeholder="年份" aria-label="年份" clearable class="f-sel">
             <el-option v-for="y in (meta?.years || [])" :key="y" :label="y" :value="y" />
           </el-select>
-          <el-select v-model="scoreCategory" placeholder="类别" clearable class="f-sel">
+          <el-select v-model="scoreCategory" placeholder="类别" aria-label="类别" clearable class="f-sel">
             <el-option v-for="c in (meta?.categories || [])" :key="c" :label="c" :value="c" />
           </el-select>
           <el-button type="primary" :loading="scoreLoading" @click="onScoreSearch">搜索</el-button>
@@ -297,20 +309,46 @@ async function onScoreSearch() {
 }
 .disc-nav__item {
   display: flex; justify-content: space-between; align-items: center;
+  width: 100%;
   padding: var(--space-2) var(--space-3);
   border-radius: var(--radius-md);
+  border: none;
+  background: none;
+  font: inherit;
+  text-align: left;
   cursor: pointer;
   font-size: var(--text-sm);
   color: var(--color-text-secondary);
 }
 .disc-nav__item:hover { background: var(--color-bg-hover, #f5f5f5); }
 .disc-nav__item.is-active { background: var(--color-primary-soft, #e8f0fe); color: var(--color-primary, #1a73e8); font-weight: 600; }
+.disc-nav__item:focus-visible { outline: 2px solid var(--color-primary); outline-offset: -2px; }
 .disc-nav__cnt { font-size: var(--text-xs); color: var(--color-text-muted); font-variant-numeric: tabular-nums; }
 .catalog__main { flex: 1 1 auto; min-width: 0; }
 
 .major-cell { display: flex; flex-direction: column; gap: 2px; }
 .major-cell__name { font-weight: 500; }
-.major-cell__cat { font-size: var(--text-xs); color: var(--color-text-muted); }
+.major-cell__cat { font-size: var(--text-xs); color: var(--color-text-muted); display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+
+/* 移动端优先（PRODUCT.md 硬要求）：门类导航从左侧栏改横向可滚动条，
+   不再挤占正文列宽度；筛选行改单列堆叠 */
+@media (max-width: 640px) {
+  .catalog { flex-direction: column; }
+  .disc-nav {
+    flex: none;
+    width: 100%;
+    max-height: none;
+    display: flex;
+    overflow-x: auto;
+    overflow-y: visible;
+    position: static;
+    gap: var(--space-1);
+    white-space: nowrap;
+  }
+  .disc-nav__item { width: auto; flex: none; }
+  .filters { flex-direction: column; align-items: stretch; }
+  .f-sel, .f-q { width: 100%; }
+}
 
 /* 热门专业快捷入口 */
 .hot-entry { margin-bottom: var(--space-4); }
@@ -329,8 +367,12 @@ async function onScoreSearch() {
 .chip:hover { border-color: var(--color-primary, #1a73e8); color: var(--color-primary, #1a73e8); background: var(--color-primary-soft, #e8f0fe); }
 
 /* 专业名链接 */
-.link { color: var(--color-primary, #1a73e8); cursor: pointer; }
+.link {
+  background: none; border: none; padding: 0; margin: 0; font: inherit; text-align: left;
+  color: var(--color-primary, #1a73e8); cursor: pointer;
+}
 .link:hover { text-decoration: underline; }
+.link:focus-visible { outline: 2px solid var(--color-primary); outline-offset: 2px; }
 
 /* 详情抽屉 */
 .detail-loading { text-align: center; padding: var(--space-8); color: var(--color-text-muted); }

@@ -14,14 +14,27 @@
 import asyncio
 import os
 import sys
+from statistics import median
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))) + "/backend")
 
 from app import db  # noqa: E402
+from app.services.match import _name_key  # noqa: E402
 
 
 async def load_units(category: str, subject: str, batch: str, y1: int, y2: int):
-    """返回以 (school, major, batch) 为键、含 y1/y2 两年位次的单元列表。"""
+    """返回同单元跨年配对结果（含 y1/y2 两年位次）。
+
+    单元身份用**规范化专业名**，不用省内专业代码——代码是逐年重排的顺序号，
+    按代码归并会把不同专业接成一条时间线（中国医科大学「临床医学」2024 年代码
+    09、2025 年代码 04，而 2024 年的 04 是另一个专业）。旧口径下本科批 36%、
+    专科批 68% 的多年单元被这样错并，凭空放大了门槛年际波动，也就放大了
+    margin/high_vol 的定参依据。口径与 app/services/match.py._build_unit_key
+    及 etl/major_trend_core.pair_year 保持一致。
+
+    同院校同专业同年出现多行（定向等，占 0.46%）按当年中位门槛归并，
+    与 match.py 第三步一致。
+    """
     rows = await db.fetch_all(
         """SELECT a.school_code, a.school_name, a.major_code, a.major_name,
                   a.batch, a.year, a.lowest_rank
@@ -34,13 +47,19 @@ async def load_units(category: str, subject: str, batch: str, y1: int, y2: int):
     )
     units: dict = {}
     for sc, sn, mc, mn, bt, y, lr in rows:
-        key = (sc, mc or mn, bt)
+        key = (sc, _name_key(mn), bt)
         u = units.setdefault(key, {
             "school": sn, "major": mn, "batch": bt,
-            "ranks": {},
+            "ranks": {}, "_raw": {},
         })
-        u["ranks"][y] = lr
-    return [u for u in units.values() if y1 in u["ranks"] and y2 in u["ranks"]]
+        u["_raw"].setdefault(y, []).append(lr)
+    out = []
+    for u in units.values():
+        u["ranks"] = {y: int(median(v)) for y, v in u["_raw"].items()}
+        u.pop("_raw")
+        if y1 in u["ranks"] and y2 in u["ranks"]:
+            out.append(u)
+    return out
 
 
 def stability_report(units, y1, y2):

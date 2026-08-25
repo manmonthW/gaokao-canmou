@@ -98,7 +98,7 @@ function switchMode(m: 'login' | 'register') {
           <el-input v-model="loginForm.password" type="password" placeholder="密码" size="large" show-password @keyup.enter="onLogin" />
         </label>
         <el-button type="primary" size="large" :loading="loading" class="auth__submit" @click="onLogin">登录</el-button>
-        <p class="auth__switch">还没有账号？<a @click="switchMode('register')">立即注册</a></p>
+        <p class="auth__switch">还没有账号？<button type="button" @click="switchMode('register')">立即注册</button></p>
       </form>
 
       <!-- 注册 -->
@@ -120,7 +120,7 @@ function switchMode(m: 'login' | 'register') {
           <el-input v-model="regForm.confirm" type="password" placeholder="再次输入密码" size="large" show-password @keyup.enter="onRegister" />
         </label>
         <el-button type="primary" size="large" :loading="loading" class="auth__submit" @click="onRegister">注册并登录</el-button>
-        <p class="auth__switch">已有账号？<a @click="switchMode('login')">去登录</a></p>
+        <p class="auth__switch">已有账号？<button type="button" @click="switchMode('login')">去登录</button></p>
       </form>
 
       <p class="auth__note">
@@ -163,6 +163,11 @@ function switchMode(m: 'login' | 'register') {
 .fld__k { font-size: var(--text-sm); color: var(--color-text-secondary); }
 .auth__submit { width: 100%; margin-top: var(--space-2); }
 .auth__switch { text-align: center; font-size: var(--text-sm); color: var(--color-text-muted); margin: 0; }
-.auth__switch a { cursor: pointer; color: var(--color-primary); }
+.auth__switch button {
+  background: none; border: none; padding: 0; margin: 0; font: inherit;
+  cursor: pointer; color: var(--color-primary);
+}
+.auth__switch button:hover { text-decoration: underline; }
+.auth__switch button:focus-visible { outline: 2px solid var(--color-primary); outline-offset: 2px; }
 .auth__note { margin: var(--space-5) 0 0; font-size: var(--text-xs); color: var(--color-text-muted); line-height: 1.7; text-align: center; }
 </style>
