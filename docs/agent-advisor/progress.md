@@ -67,3 +67,19 @@
   - backend 镜像构建通过，容器 UID/GID 均为 10001，`/app/data` 可写且镜像内不含本地数据库；
   - compose YAML 解析与关键生产环境字段检查通过。本机无 Compose v2，完整 `docker compose config` 留待 EWS；
   - nginx 镜像因 Docker Hub 拉取超时未能本地执行 `nginx -t`，部署前仍需在 EWS 验证。
+
+### Phase 0.1 + 0.2：EWS 部署与复测（2026-09-15）
+- **Status:** 已部署 EWS 并复测通过（commit 230765f）
+- Actions taken（均通过 `ssh ews`，过滤法律 banner）：
+  - rsync 同步 `webapp/backend`、`webapp/frontend`、`docker-compose.ews.yml`（**不带 `--delete`**，防止误删 EWS `webapp/etl/` 67 个 ETL 脚本；本地 `webapp/etl/` 为空）；
+  - EWS 新建 `webapp/.env`（600）：生产环境 + 只读 DSN + 明确 CORS Origin + 在 EWS 生成的 64 hex JWT_SECRET（从未进入对话）；旧 token 全部失效（用户确认 token 无问题）；
+  - 预飞行：`docker compose config` + 在 `gaokao-ln_default` 网络内 `nginx -t` 均 OK（首次 host-not-found 为容器脱网的 DNS 假告警，限流语法已过）；
+  - `docker compose build --no-cache backend frontend`；
+  - **关键**：切非 root 后，对已有命名卷 `gaokao-ln_backend_user_data` 执行一次 chown 10001:10001（原 `users.db` 属 root），否则非 root 容器写不了内测用户库；
+  - `docker compose up -d --no-deps backend frontend`（**绝不碰 db**）；铛 db 全程 `Up 5 weeks (healthy)` 未动。
+- 复测（公网 `https://gaokao-ln.ims.ews.gic.ericsson.se`，自签证书用 `curl -k`）：
+  - backend `healthy`（10001 非 root 可写 users.db）、frontend `healthy`；`/health` → 200 `ok`；
+  - nginx Agent 层限流：`/api/v1/agent/` 前 4 穿透（404，burst=3+1）、第 5 起 429 ✅；
+  - 应用层登录限流：`/api/v1/auth/login` 正确 body 前 10 次 401、第 11 起 429（10/60s）✅；
+  - `category_unsupported`：`category=艺术类` 返回限制提示 + `error_code`；`普通类` 正常返回候选✅；
+  - `/api/v1/plan/analyze`：空方案 `ok:false`；6 志愿均衡方案 `ok:true`、counts 精确✅。
