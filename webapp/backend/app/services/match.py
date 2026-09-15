@@ -24,12 +24,15 @@ A1–A4 算法层增强（2026-08-08，依据 first-principles-review.md §5.2�
   - 历史跨 2024/2025/2026 三年；考生位次与历史位次直接用「位次法」比较
     （R <= lowest_rank 表示考生位次优于该门槛，等价的分数更高）。
 """
+import asyncio
+import gc
 import re
 from collections import defaultdict, OrderedDict
 from statistics import median
 from typing import Optional
 
 import psycopg2
+from fastapi.concurrency import run_in_threadpool
 
 from app import db
 
@@ -127,12 +130,19 @@ async def _trend_available() -> bool:
     return _trend_schema
 
 
-# --------------------------- 候选管线缓存（方案一优化，0016） ---------------------------
-# _prepare_candidates 的输出只依赖入参与库内数据，与前端分页/切档/偏好切换无关；
-# 交互中同一候选集被反复重算（基线约 9s/次）。按 (data_version + 全部入参)
-# 缓存：年度投档入库后 data_version 变化，旧键自然失效；超容量淘汰最旧。
-_PREPARE_CACHE: "OrderedDict[tuple, tuple]" = OrderedDict()
-_PREPARE_CACHE_MAX = 64
+# --------------------------- 单元集合缓存（2026-09-15 重构） ---------------------------
+# 管线分两段：
+#   ① 单元集合（主查询 → 分组 → 历史统计 → 标准专业名 / 学科评估 / 趋势 / 选科查找）
+#      只依赖 (data_version, 类别, 学科类, 批次, 考生年, cfg)，与考生位次、偏好筛选、
+#      再选科目都无关——按这几个键缓存，热点键只有个位数（普通类 × 两个学科类 × 本/专科）。
+#   ② 分档、选科排除、偏好筛选（_classify_units）每次请求现算，纯内存。
+# 旧实现把 rank 与全部筛选放进缓存键：每个用户位次不同，命中率接近 0，换一次筛选
+# 也要冷算约 3s，且整段 CPU 计算跑在事件循环上，冷请求会卡住整个服务。
+# 年度投档入库后 data_version 变化，旧键自然失效；超容量淘汰最旧。
+_UNIT_CACHE: "OrderedDict[tuple, tuple]" = OrderedDict()
+_UNIT_CACHE_MAX = 16
+# 同键冷启动单飞：高峰期同一批次的并发首请求只算一次，其余等待后直接命中
+_UNIT_LOCKS: "dict[tuple, asyncio.Lock]" = {}
 
 
 def _prepare_cache_key(**kw) -> tuple:
@@ -674,48 +684,9 @@ async def _resolve_rank(year, category, subject, rank, score):
     return rank
 
 
-async def _prepare_candidates(
-    *, category, subject, batch, year, rank,
-    province=None, city=None, level=None, nature=None, type_=None,
-    major_keyword=None, has_both_years=None,
-    exclude_flags=None, electives=None, cfg,
-):
-    """第 2–4 步 + 选科校验 + 偏好筛选：返回筛选后候选（match 与 sensitivity 共用，A3）。
-    返回 (filtered, candidates_all, excluded_first, excluded_re, subjreq_loaded)。"""
-    # ---------- 管线缓存（方案一）：同参数 + 同 data_version 直接复用 ----------
-    version = await get_data_version()
-    cache_key = (version, _prepare_cache_key(
-        category=category, subject=subject, batch=batch, year=year, rank=rank,
-        province=province, city=city, level=level, nature=nature, type_=type_,
-        major_keyword=major_keyword, has_both_years=has_both_years,
-        exclude_flags=exclude_flags, electives=electives, cfg=cfg))
-    hit = _PREPARE_CACHE.get(cache_key)
-    if hit is not None:
-        _PREPARE_CACHE.move_to_end(cache_key)
-        return hit
-
-    # ---------- 第二步：资格/数据过滤 ----------
-    # 包含 lowest_rank 为空行（库内约 570 行）：这些归入「数据不足」档，
-    # 按 roadmap 要求降级为「分数参考」并显式标注，而非直接丢弃。
-    # strength_tags 列仅在新库（0014 已迁移）存在：旧库探测后改取 NULL，
-    # 保证主查询不因列缺失 500（C1 旧库降级）。
-    tags_ok, _ms_ok = await _strength_available()
-    strength_col = "p.strength_tags" if tags_ok else "NULL"
-    rows = await db.fetch_all(
-        f"""SELECT a.year, a.school_code, a.school_name, a.major_code, a.major_name,
-                  a.batch, a.lowest_rank, a.lowest_score, a.flags,
-                  p.province, p.city, p.level, p.nature, p.type,
-                  p.is_985, p.is_211, p.is_dfc, ct.tier, {strength_col}
-           FROM admission_scores a
-           LEFT JOIN school_profiles p ON a.school_code = p.code
-           LEFT JOIN cities ct ON p.city = ct.city
-           WHERE a.category = %s AND a.subject = %s AND a.batch = ANY(%s)
-             AND a.is_collection = FALSE
-             AND a.score_kind = '投档最低分'
-           ORDER BY a.school_code, a.major_name, a.batch, a.year""",
-        (category, subject, _batch_variants(batch)),
-    )
-
+def _group_units(rows, batch, cfg) -> list:
+    """第三、四步（纯 CPU，在线程池执行）：按单元身份分组 + 历史统计。
+    返回单元列表，顺序 = 主查询行序中各单元首次出现的顺序。"""
     # ---------- 第三步：构造候选单元 ----------
     # 单元身份 = 院校 + 规范化专业名 + 归一批次（见 _build_unit_key 的说明：
     # 省内专业代码逐年重排，不能做身份）。同一院校同一专业在同一年出现多行的
@@ -762,8 +733,8 @@ async def _prepare_candidates(
             g["major_name"], g["major_code"] = mn, mc
         g["years"].append(y)
 
-    units: dict = {}
-    for key, g in groups.items():
+    units: list = []
+    for g in groups.values():
         by_year = g.pop("_by_year")
         multi = {}
         for y in sorted(by_year):
@@ -780,13 +751,13 @@ async def _prepare_candidates(
                 g["scores"][y] = median(slot["scores"])
         g["years"] = sorted(set(g["years"]))
         g["multi_unit_years"] = multi
-        units[key] = g
+        units.append(g)
 
     # ---------- 第四步：历史统计 ----------
     # 「最近两个数据年」动态口径：取当前查询结果中最大的两个年份，
     # 新一年接入后无需改代码；数据不足两年时 has_both_years 均为 False。
     last_two = sorted({r[0] for r in rows})[-2:]
-    for u in units.values():
+    for u in units:
         yrs = sorted(set(u["years"]))
         ranks = sorted(u["ranks"])
         u["n_years"] = len(ranks)  # 有最低位次的年份数
@@ -822,11 +793,57 @@ async def _prepare_candidates(
         u["last_year_score"] = u["scores"].get(max_y)
         u["flags"] = sorted(u["flags"])
         u["yearly"].sort(key=lambda t: t[0])
+    return units
+
+
+def _attach_subject_reqs(units: list, req_rows, subject) -> None:
+    """选科查找（纯 CPU，在线程池执行）：结果只依赖院校名/专业名/学科类，
+    与再选科目无关，随单元集合一起缓存在私有键 _xk 上（_build_candidate 按显式
+    键构造输出，私有键不会泄漏到响应里）。
+    _xk = (reqs, level, school_known, 展示串, 首选是否符合)。"""
+    # 口径：官方文件用国标院校代码，投档库用省内报考代码 → 以 school_name 联结；
+    # 分层匹配（别名→精确→归一→基础名→枚举反查，audit_xk 审计覆盖率 ≈89%）。
+    idx = build_req_indexes(req_rows)
+    for u in units:
+        reqs, level, school_known = lookup_reqs(idx, u["school_name"], u["major_name"])
+        if reqs:
+            u["_xk"] = (reqs, level, school_known, _req_display(reqs),
+                        any(_first_req_ok(fr, subject) for fr, rr in reqs))
+        else:
+            u["_xk"] = (None, level, school_known, None, True)
+
+
+async def _build_units(*, category, subject, batch, year, cfg):
+    """单元集合（缓存段）：返回 (units, subjreq_loaded)。与考生位次/筛选/再选科目无关。"""
+    # ---------- 第二步：资格/数据过滤 ----------
+    # 包含 lowest_rank 为空行（库内约 570 行）：这些归入「数据不足」档，
+    # 按 roadmap 要求降级为「分数参考」并显式标注，而非直接丢弃。
+    # strength_tags 列仅在新库（0014 已迁移）存在：旧库探测后改取 NULL，
+    # 保证主查询不因列缺失 500（C1 旧库降级）。
+    tags_ok, _ms_ok = await _strength_available()
+    strength_col = "p.strength_tags" if tags_ok else "NULL"
+    rows = await db.fetch_all(
+        f"""SELECT a.year, a.school_code, a.school_name, a.major_code, a.major_name,
+                  a.batch, a.lowest_rank, a.lowest_score, a.flags,
+                  p.province, p.city, p.level, p.nature, p.type,
+                  p.is_985, p.is_211, p.is_dfc, ct.tier, {strength_col}
+           FROM admission_scores a
+           LEFT JOIN school_profiles p ON a.school_code = p.code
+           LEFT JOIN cities ct ON p.city = ct.city
+           WHERE a.category = %s AND a.subject = %s AND a.batch = ANY(%s)
+             AND a.is_collection = FALSE
+             AND a.score_kind = '投档最低分'
+           ORDER BY a.school_code, a.major_name, a.batch, a.year""",
+        (category, subject, _batch_variants(batch)),
+    )
+
+    # ---------- 第三、四步：分组 + 历史统计（CPU 段，不占事件循环） ----------
+    units = await run_in_threadpool(_group_units, rows, batch, cfg)
 
     # ---------- 第四步（补充）：批量关联标准专业名 ----------
     # 把招生专业名（如"工科试验班(卓越计划)[计算机科学与...]"）映射到
     # major_catalog 里的标准专业名（如"计算机科学与技术"），供前端跳转专业详情。
-    major_names = {u["major_name"] for u in units.values() if u["major_name"]}
+    major_names = {u["major_name"] for u in units if u["major_name"]}
     catalog_map: dict[str, str] = {}
     if major_names:
         try:
@@ -843,74 +860,37 @@ async def _prepare_candidates(
                 raise
             # 旧库降级（未跑 0016）：回退实时 ILIKE 聚合，慢但可用；
             # 口径与 ETL 一致：包含即命中，多命中取最长标准名
-            rows = await db.fetch_all(
+            cat_rows = await db.fetch_all(
                 """SELECT mc.name, a.major_name
                    FROM major_catalog mc
                    JOIN admission_scores a ON a.major_name ILIKE '%%' || mc.name || '%%'
                    WHERE a.major_name = ANY(%s)""",
                 (list(major_names),),
             )
-            for std_name, adm_name in rows:
+            for std_name, adm_name in cat_rows:
                 # 同一招生名可能命中多个标准专业，取最长的（最具体）
                 if adm_name not in catalog_map or len(std_name) > len(catalog_map[adm_name]):
                     catalog_map[adm_name] = std_name
-    for u in units.values():
+    for u in units:
         u["catalog_name"] = catalog_map.get(u["major_name"])
 
-    # ---------- 第四步（补充）：批量关联专业实力（major_strengths） ----------
-    # 一条 GROUP BY 批量查询覆盖全部候选单元（严禁逐单元查询，避免 N+1）：
-    # 匹配键 = school_code + 标准专业名（catalog_name），辅以招生专业名 major_name
-    # 回退；在内存按 (school_code, 专业名) 合并为每单元的 major_strength 列表。
-    # 空表/无命中时每个单元得到空列表，不影响既有契约。
-    # 旧库降级（C1）：表不存在时探测已判 False 直接跳过；即便探测与查询之间
-    # 模式有变，查询异常也捕获降级为每单元空列表，不让 /match 整体 500。
-    for u in units.values():
+    # ---------- 第四步（补充）：批量关联第五轮学科评估（eval5_a） ----------
+    # 方案 A：匹配页只显示第五轮学科评估（A+/A/A-），major_strength 只承载 eval5 数据。
+    # 通过 major_eval_map 将标准专业名映射到学科评估学科名，
+    # 再 JOIN school_disciplines 取对应学校在该学科的评估等级。
+    # 无命中时每单元得到空列表，不影响既有契约。
+    # （2026-09-15 移除此前先查 major_strengths 再整体覆盖的死查询：其结果从未进入响应。）
+    # 旧库降级（C1）：_ms_ok 为假时跳过；即便探测与查询之间模式有变，
+    # 查询异常也捕获降级为每单元空列表，不让 /match 整体 500。
+    for u in units:
         u["major_strength"] = []
-    ms_codes = {u["school_code"] for u in units.values() if u["school_code"]}
+    ms_codes = {u["school_code"] for u in units if u["school_code"]}
     ms_names = set()
-    for u in units.values():
+    for u in units:
         if u.get("catalog_name"):
             ms_names.add(u["catalog_name"])
         if u["major_name"]:
             ms_names.add(u["major_name"])
-    if ms_codes and ms_names and _ms_ok:
-        try:
-            ms_rows = await db.fetch_all(
-                """SELECT school_code, major_name, source, data_year, tier
-                   FROM major_strengths
-                   WHERE school_code = ANY(%s) AND major_name = ANY(%s)
-                   GROUP BY school_code, major_name, source, data_year, tier""",
-                (list(ms_codes), list(ms_names)),
-            )
-        except psycopg2.Error as e:
-            if not db.schema_missing(e):
-                raise
-            ms_rows = []
-        ms_map: dict = defaultdict(list)
-        for sc2, mn2, src, dy, tier in ms_rows:
-            ms_map[(sc2, mn2)].append(
-                {"major_name": mn2, "source": src, "tier": tier,
-                 "data_year": dy})
-        for u in units.values():
-            merged: dict = {}
-            # catalog_name 优先，major_name 回退；两者同值时天然去重
-            for nm in (u.get("catalog_name"), u["major_name"]):
-                if not nm:
-                    continue
-                for item in ms_map.get((u["school_code"], nm), []):
-                    merged[(item["major_name"], item["source"],
-                            item["tier"], item["data_year"])] = item
-            u["major_strength"] = sorted(
-                merged.values(),
-                key=lambda d: (str(d["source"]), str(d["major_name"])))
-
-    # ---------- 第四步（补充）：批量关联第五轮学科评估（eval5_a） ----------
-    # 方案 A：匹配页只显示第五轮学科评估（A+/A/A-），替换 major_strength 为 eval5 数据。
-    # 通过 major_eval_map 将标准专业名映射到学科评估学科名，
-    # 再 JOIN school_disciplines 取对应学校在该学科的评估等级。
-    # 无命中时每单元得到空列表，不影响既有契约。
-    for u in units.values():
-        u["major_strength"] = []
     if ms_codes and ms_names and _ms_ok:
         try:
             eval5_rows = await db.fetch_all(
@@ -931,7 +911,7 @@ async def _prepare_candidates(
         eval5_map: dict = {}
         for sc, mn, grade in eval5_rows:
             eval5_map[(sc, mn)] = grade
-        for u in units.values():
+        for u in units:
             grade = None
             for nm in (u.get("catalog_name"), u["major_name"]):
                 if nm and (u["school_code"], nm) in eval5_map:
@@ -953,7 +933,7 @@ async def _prepare_candidates(
     # （etl/major_trend_core.py），后端不重复实现，避免两处漂移。
     trend_ok = await _trend_available()
     if trend_ok:
-        adm_names = [u["major_name"] for u in units.values() if u["major_name"]]
+        adm_names = [u["major_name"] for u in units if u["major_name"]]
         try:
             trend_rows = await db.fetch_all(
                 """SELECT a.admission_name, t.major_key, t.label, t.label_reason,
@@ -1002,18 +982,10 @@ async def _prepare_candidates(
                              "published_on": ctx_on.isoformat() if ctx_on else None}
                             if ctx_note else None),
             }
-        for u in units.values():
+        for u in units:
             u["major_trend"] = tmap.get(u["major_name"])
 
-    # ---------- 第四步之后：构造候选 ----------
-    candidates = [_build_candidate(u, rank, cfg) for u in units.values()]
-
-    # ---------- 选科资格校验（D2b） ----------
-    # 首选不匹配无条件排除（学科类已知，首选是投档硬约束）；
-    # 再选不匹配仅当填了再选才排除（用户私有信息）；
-    # 已入库即挂展示/未核验标记。
-    excluded_first = 0
-    excluded_re = 0
+    # ---------- 选科要求查找（D2b）：只做查找，排除留给 _classify_units ----------
     subjreq_loaded = False
     cnt = await db.fetch_one(
         "SELECT count(*) FROM subject_requirements WHERE year=%s", (year,))
@@ -1022,21 +994,69 @@ async def _prepare_candidates(
         req_rows = await db.fetch_all(
             """SELECT school_code, school_name, major_name, first_req, re_req
                FROM subject_requirements WHERE year=%s""", (year,))
-        # 口径：官方文件用国标院校代码，投档库用省内报考代码 → 以 school_name 联结；
-        # 分层匹配（别名→精确→归一→基础名→枚举反查，audit_xk 审计覆盖率 ≈89%）；
-        # 未收录拆分「专业未收录」（学校在表）/「院校未收录」（学校不在表），
-        # 一律不排除、仅警示（2027 计划可能调整，保守优先）。
-        idx = build_req_indexes(req_rows)
-        kept = []
-        for c in candidates:
-            reqs, level, school_known = lookup_reqs(
-                idx, c["school_name"], c["major_name"])
-            c["subject_match_level"] = level
+        await run_in_threadpool(_attach_subject_reqs, units, req_rows, subject)
+    return units, subjreq_loaded
+
+
+def _gc_settle():
+    """新建的缓存条目有数十万个长期存活的容器对象（物理本科批约 62MB），不移出去的话
+    每次全量 GC 都要重扫一遍，实测热请求因此慢 40%，并让所有线程停顿上百毫秒。
+    建好后收一次残余垃圾再 freeze，把现存对象移入永久代、不再参与扫描；被淘汰的条目
+    没有循环引用，照常靠引用计数释放。每个缓存键每个数据版本只执行一次。"""
+    gc.collect()
+    gc.freeze()
+
+
+async def _load_units(*, category, subject, batch, year, cfg):
+    """带缓存与单飞的单元集合入口：返回 (units, subjreq_loaded)。
+    返回的单元 dict 被所有请求共享，调用方只能读、不能改。"""
+    version = await get_data_version()
+    key = (version, category, subject, batch, year, _prepare_cache_key(cfg=cfg))
+    hit = _UNIT_CACHE.get(key)
+    if hit is not None:
+        _UNIT_CACHE.move_to_end(key)
+        return hit
+    lock = _UNIT_LOCKS.setdefault(key, asyncio.Lock())
+    try:
+        async with lock:
+            hit = _UNIT_CACHE.get(key)  # 等锁期间可能已由同键的首请求建好
+            if hit is not None:
+                _UNIT_CACHE.move_to_end(key)
+                return hit
+            result = await _build_units(
+                category=category, subject=subject, batch=batch, year=year, cfg=cfg)
+            _UNIT_CACHE[key] = result
+            while len(_UNIT_CACHE) > _UNIT_CACHE_MAX:
+                _UNIT_CACHE.popitem(last=False)
+            await run_in_threadpool(_gc_settle)
+            return result
+    finally:
+        if not lock.locked():
+            _UNIT_LOCKS.pop(key, None)
+
+
+def _classify_units(
+    units, *, rank, subject, electives, subjreq_loaded,
+    province, city, level, nature, type_, major_keyword, has_both_years,
+    exclude_flags, cfg,
+):
+    """请求段（纯 CPU，在线程池执行）：分档 + 选科排除 + 偏好筛选。
+    每个候选都是新建 dict，不改动共享的单元集合。"""
+    # ---------- 分档 + 选科资格校验（D2b） ----------
+    # 首选不匹配无条件排除（学科类已知，首选是投档硬约束）；
+    # 再选不匹配仅当填了再选才排除（用户私有信息）；
+    # 已入库即挂展示/未核验标记。
+    # 未收录拆分「专业未收录」（学校在表）/「院校未收录」（学校不在表），
+    # 一律不排除、仅警示（2027 计划可能调整，保守优先）。
+    excluded_first = 0
+    excluded_re = 0
+    candidates = []
+    for u in units:
+        xk = u.get("_xk") if subjreq_loaded else None
+        if xk is not None:
+            reqs, _lvl, _known, _disp, first_ok = xk
             if reqs:
-                disp = _req_display(reqs)
-                if disp:
-                    c["subject_req"] = disp
-                if not any(_first_req_ok(fr, subject) for fr, rr in reqs):
+                if not first_ok:
                     excluded_first += 1
                     continue
                 if electives and not any(
@@ -1044,6 +1064,13 @@ async def _prepare_candidates(
                         for fr, rr in reqs if _first_req_ok(fr, subject)):
                     excluded_re += 1
                     continue
+        c = _build_candidate(u, rank, cfg)
+        if xk is not None:
+            reqs, level_, school_known, disp, _first_ok = xk
+            c["subject_match_level"] = level_
+            if reqs:
+                if disp:
+                    c["subject_req"] = disp
             else:
                 c["subject_unverified"] = True
                 c["subject_status"] = ("major_missing" if school_known
@@ -1054,20 +1081,16 @@ async def _prepare_candidates(
                          if school_known else
                          "选科要求未收录（该院校未列入官方表），2027 年可能不在辽招生，请重点核实。")
                     c["warning"] = f"{c['warning']} {w}" if c["warning"] else w
-            kept.append(c)
-        candidates = kept
-
-    # 任务 #8 新增键：统一移到每个候选的最末尾（「新键一律末尾」约定），
-    # 保证既有键（含选科校验后追加的 subject_* 键）字节顺序不变。
-    for c in candidates:
+        # 任务 #8 / 0017 新增键：统一移到每个候选的最末尾（「新键一律末尾」约定），
+        # 保证既有键（含选科校验后追加的 subject_* 键）字节顺序不变。
         c["is_985"] = c.pop("is_985", None)
         c["is_211"] = c.pop("is_211", None)
         c["strength_tags"] = c.pop("strength_tags", [])
         c["major_strength"] = c.pop("major_strength", [])
-        # 0017 新增键，继续追加在末尾
         c["monotonic"] = c.pop("monotonic", None)
         c["multi_unit_years"] = c.pop("multi_unit_years", {})
         c["major_trend"] = c.pop("major_trend", None)
+        candidates.append(c)
 
     # 应用偏好筛选（省/市/层次/性质/类型/专业关键词/两年均有/排除标记）
     def keep(c):
@@ -1090,13 +1113,27 @@ async def _prepare_candidates(
         return True
 
     filtered = [c for c in candidates if keep(c)]
-    result = (filtered, candidates, excluded_first, excluded_re, subjreq_loaded)
-    # 入缓存（超容量淘汰最旧）；调用方不得就地修改返回的候选 dict
-    _PREPARE_CACHE[cache_key] = result
-    _PREPARE_CACHE.move_to_end(cache_key)
-    while len(_PREPARE_CACHE) > _PREPARE_CACHE_MAX:
-        _PREPARE_CACHE.popitem(last=False)
-    return result
+    return filtered, candidates, excluded_first, excluded_re, subjreq_loaded
+
+
+async def _prepare_candidates(
+    *, category, subject, batch, year, rank,
+    province=None, city=None, level=None, nature=None, type_=None,
+    major_keyword=None, has_both_years=None,
+    exclude_flags=None, electives=None, cfg,
+):
+    """第 2–4 步 + 选科校验 + 偏好筛选：返回筛选后候选（match / sensitivity / refresh 共用）。
+    返回 (filtered, candidates_all, excluded_first, excluded_re, subjreq_loaded)；
+    两个列表与其中的候选 dict 都是本次请求新建的，调用方可以自由排序。"""
+    units, subjreq_loaded = await _load_units(
+        category=category, subject=subject, batch=batch, year=year, cfg=cfg)
+    return await run_in_threadpool(
+        _classify_units, units,
+        rank=rank, subject=subject, electives=electives, subjreq_loaded=subjreq_loaded,
+        province=province, city=city, level=level, nature=nature, type_=type_,
+        major_keyword=major_keyword, has_both_years=has_both_years,
+        exclude_flags=exclude_flags, cfg=cfg,
+    )
 
 
 def _risk_at(c: dict, R: int, cfg: dict):
@@ -1147,6 +1184,18 @@ def _totals_at_rank(candidates, R: int, cfg: dict):
     return totals
 
 
+def _sensitivity_scenarios(filtered, rank: int, cfg: dict) -> list:
+    """A3 五个位次情景的分档计数（纯 CPU，在线程池执行）。"""
+    scenarios = []
+    for off, label in SENSITIVITY_OFFSETS:
+        R2 = max(1, int(round(rank * (1 + off))))
+        scenarios.append({
+            "label": label, "offset": off, "rank": R2,
+            "totals": _totals_at_rank(filtered, R2, cfg),
+        })
+    return scenarios
+
+
 async def sensitivity(
     *,
     year: int,
@@ -1177,13 +1226,7 @@ async def sensitivity(
         major_keyword=major_keyword, has_both_years=has_both_years,
         exclude_flags=exclude_flags, electives=electives, cfg=cfg,
     )
-    scenarios = []
-    for off, label in SENSITIVITY_OFFSETS:
-        R2 = max(1, int(round(rank * (1 + off))))
-        scenarios.append({
-            "label": label, "offset": off, "rank": R2,
-            "totals": _totals_at_rank(filtered, R2, cfg),
-        })
+    scenarios = await run_in_threadpool(_sensitivity_scenarios, filtered, rank, cfg)
     return {
         "examinee": {"year": year, "category": category, "subject": subject,
                      "batch": batch, "score": score, "rank": rank},
@@ -1235,6 +1278,61 @@ async def refresh_snapshots(
         if c is not None:
             out.append(c)
     return {"data_version": await get_data_version(), "items": out}
+
+
+def _summarize(filtered, candidates, *, risk, pref_sort, page, page_size, interval, cfg):
+    """match 的汇总段（纯 CPU，在线程池执行）：分档计数、风险过滤、排序、分页、facet。
+    返回 (totals, totals_lo, page, items, facets)。"""
+    # 风险分档计数
+    totals = {k: 0 for k in RISK_ORDER}
+    for c in filtered:
+        totals[c["risk"]] += 1
+    totals["total"] = len(filtered)
+    # P1 区间模式：乐观情景（下界 lo）的分档计数
+    totals_lo = _totals_at_rank(filtered, interval["lo"], cfg) if interval else None
+
+    # 风险过滤前的匹配结果快照（供城市 facet 使用，只含实际出现的城市）
+    matched_filtered = filtered
+
+    # 按风险过滤（可选）
+    if risk:
+        filtered = [c for c in filtered if c["risk"] == risk]
+
+    # 排序：风险优先（保>稳>冲>高波动>数据不足）；同档内默认按位次差升序，
+    # P5 偏好重排：level＝院校层次优先，city＝城市分级优先
+    filtered.sort(key=lambda c: _pref_sort_key(c, pref_sort))
+
+    # 分页
+    page = max(1, page)
+    start = (page - 1) * page_size
+    items = filtered[start:start + page_size]
+    # P1 区间模式：每条结果附乐观情景分档（主判定为悲观 hi），risk_lo 键追加在末尾
+    if interval:
+        items = [
+            {**c, **dict(zip(("risk_lo", "risk_reason_lo"),
+                             _risk_at(c, interval["lo"], cfg)))}
+            for c in items
+        ]
+
+    # 聚合 facet（供前端下拉）
+    # - 省/层次/性质/类型 基于全量候选（保持下拉稳定可选）
+    # - 城市基于"本次匹配结果"（风险过滤前的 filtered，即经考生位次/选科分类后的候选），
+    #   因此城市下拉只显示本次结果中实际出现的城市，而非该省全部城市
+    city_base = matched_filtered
+    facets: dict = {"province": {}, "city": {}, "level": {}, "nature": {}, "type": {}}
+    for c in candidates:
+        for fkey in ("province", "level", "nature", "type"):
+            v = c[fkey]
+            if v is None:
+                continue
+            facets[fkey][v] = facets[fkey].get(v, 0) + 1
+    for c in city_base:
+        v = c["city"]
+        if v is None:
+            continue
+        facets["city"][v] = facets["city"].get(v, 0) + 1
+    facets = {k: sorted(v.items(), key=lambda kv: -kv[1]) for k, v in facets.items()}
+    return totals, totals_lo, page, items, facets
 
 
 async def match(
@@ -1301,57 +1399,9 @@ async def match(
         exclude_flags=exclude_flags, electives=electives, cfg=cfg,
     )
 
-    # 风险分档计数
-    totals = {k: 0 for k in RISK_ORDER}
-    for c in filtered:
-        totals[c["risk"]] += 1
-    totals["total"] = len(filtered)
-    # P1 区间模式：乐观情景（下界 lo）的分档计数
-    totals_lo = _totals_at_rank(filtered, interval["lo"], cfg) if interval else None
-
-    # 风险过滤前的匹配结果快照（供城市 facet 使用，只含实际出现的城市）
-    matched_filtered = filtered
-
-    # 按风险过滤（可选）
-    if risk:
-        filtered = [c for c in filtered if c["risk"] == risk]
-
-    # 排序：风险优先（保>稳>冲>高波动>数据不足）；同档内默认按位次差升序，
-    # P5 偏好重排：level＝院校层次优先，city＝城市分级优先
-    filtered.sort(key=lambda c: _pref_sort_key(c, pref_sort))
-
-    # 分页
-    total = len(filtered)
-    page = max(1, page)
-    start = (page - 1) * page_size
-    items = filtered[start:start + page_size]
-    # P1 区间模式：每条结果附乐观情景分档（主判定为悲观 hi）。
-    # 候选 dict 被管线缓存复用，不能就地改——用合并副本附加 risk_lo 键
-    if interval:
-        items = [
-            {**c, **dict(zip(("risk_lo", "risk_reason_lo"),
-                             _risk_at(c, interval["lo"], cfg)))}
-            for c in items
-        ]
-
-    # 聚合 facet（供前端下拉）
-    # - 省/层次/性质/类型 基于全量候选（保持下拉稳定可选）
-    # - 城市基于"本次匹配结果"（风险过滤前的 filtered，即经考生位次/选科分类后的候选），
-    #   因此城市下拉只显示本次结果中实际出现的城市，而非该省全部城市
-    city_base = matched_filtered
-    facets: dict = {"province": {}, "city": {}, "level": {}, "nature": {}, "type": {}}
-    for c in candidates:
-        for fkey in ("province", "level", "nature", "type"):
-            v = c[fkey]
-            if v is None:
-                continue
-            facets[fkey][v] = facets[fkey].get(v, 0) + 1
-    for c in city_base:
-        v = c["city"]
-        if v is None:
-            continue
-        facets["city"][v] = facets["city"].get(v, 0) + 1
-    facets = {k: sorted(v.items(), key=lambda kv: -kv[1]) for k, v in facets.items()}
+    totals, totals_lo, page, items, facets = await run_in_threadpool(
+        _summarize, filtered, candidates, risk=risk, pref_sort=pref_sort,
+        page=page, page_size=page_size, interval=interval, cfg=cfg)
 
     version = await get_data_version()
 
