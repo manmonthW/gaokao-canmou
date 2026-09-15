@@ -11,6 +11,7 @@ from fastapi.responses import Response
 from pydantic import BaseModel, Field, field_validator
 
 from app.services.plan_export import build_plan_xlsx
+from app.services.plan_analysis import analyze_plan
 
 router = APIRouter(prefix="/plan", tags=["plan"])
 
@@ -60,6 +61,31 @@ class PlanExportRequest(BaseModel):
     created_at: Optional[str] = None
     examinee: PlanExaminee
     items: list[PlanItem] = Field(default_factory=list, max_length=200)
+
+
+class PlanAnalyzeEntry(BaseModel):
+    risk: str
+    school_code: str
+    school_name: Optional[str] = None
+    major_code: Optional[str] = None
+    major_name: Optional[str] = None
+    last_year_rank: Optional[int] = None
+    flags: list[str] = Field(default_factory=list, max_length=20)
+    over_safe: bool = False
+    over_reach: bool = False
+    data_version: Optional[str] = None
+    trend_label: Optional[str] = None
+
+
+class PlanAnalyzeRequest(BaseModel):
+    data_version: Optional[str] = None
+    strategy: str = "均衡"
+    entries: list[PlanAnalyzeEntry] = Field(default_factory=list, max_length=200)
+
+
+@router.post("/analyze")
+async def analyze(req: PlanAnalyzeRequest):
+    return analyze_plan(req.model_dump())
 
 
 @router.post("/export")

@@ -9,8 +9,8 @@
 「AI 参谋助手」：邀请制内测、模型可替换（为国内已备案模型留路）、所有结论可溯源。
 
 ## Current Phase
-Phase 0.1 — /match 缓存重构：**代码完成、本地验证通过，待用户确认后提交并部署 EWS**
-下一步：Phase 0.2（其余前置修复）
+Phase 0.2 — 其余前置修复：**代码完成，本地验证通过；尚未提交或部署 EWS**
+下一步：完成验证并部署 Phase 0；随后进入 Phase 0.3 模型接入技术验证
 
 ## 已确认的决策（2026-09-15，用户）
 | 决策 | 结论 |
@@ -33,19 +33,20 @@ Phase 0.1 — /match 缓存重构：**代码完成、本地验证通过，待用
 - [x] 回归：与「旧代码每次清空缓存」输出比对 39/41 逐字节一致，另 2 组为修复的旧 bug（见 findings）；
       pytest 58 passed（新增 `tests/test_match_cache.py` 6 个）；`etl/smoke_strength.py` golden 契约 ALL PASS
 - [x] 记录重构后性能与缓存内存占用（见 progress.md）
-- [ ] 用户确认后提交；按 `EWS_DEPLOY_LESSONS.md` 部署 EWS（仅重建 backend，无迁移）并在 EWS 复测
-- **Status:** 代码完成，待提交/部署
+- [ ] 按 `EWS_DEPLOY_LESSONS.md` 部署 EWS（重建 backend/frontend，无迁移）并在 EWS 复测
+- **Status:** 代码完成、已提交缓存重构；待与 Phase 0.2 一起部署
 
-### Phase 0.1 衍生待办（需用户拍板）
-- [ ] 艺术类/体育类在智能匹配页的呈现：修复后艺术类返回「数据不足」列表（旧代码因 bug 恒为 0 条）。
-      产品原则是「首版仅历史查询 + 限制提示」——是否改为直接显示限制提示、不出列表？
+### Phase 0.1 衍生待办
+- [x] 艺术类/体育类不套用普通类位次分档：后端统一返回 `category_unsupported`，前端展示限制说明和历史查询入口
 
 ### Phase 0.2：其余前置修复（§1.2）
-- [ ] 限流（nginx limit_req + 应用层）
-- [ ] compose 安全（只读角色、JWT_SECRET、CORS、删 `COPY data`、`.dockerignore`）
-- [ ] 后端容器非 root（UID 10001）+ 用户数据卷 chown 方案
-- [ ] 方案体检规则迁到后端（`/plan/analyze`），前端改用
-- **Status:** pending
+- [x] 限流（nginx 通用/Agent 预留限流 + 应用层登录/注册防爆破）
+- [x] compose 安全（只读 DSN/JWT/CORS 改为部署必填；生产启动强校验；删 `COPY data`；`.dockerignore` 排除 data/.env）
+- [x] 后端容器非 root（UID 10001）；部署时仍需对已有用户数据卷执行一次 chown
+- [x] 方案体检规则迁到后端（`/plan/analyze`），前端在线调用，网络失败时本地规则只作降级
+- [x] 本地全量验证：后端 67 tests、前端 build、diff check、配置 fail-closed、镜像 UID/data 检查通过
+- [ ] EWS 注入强 JWT、明确 CORS、只读 DSN，执行数据卷 chown；运行 Compose v2 config 与 nginx -t 后部署验证
+- **Status:** 代码完成，本地验证通过；待提交/部署
 
 ### Phase 0.3：模型接入技术验证（§5、§16 阶段 0）
 - [ ] 模型工厂：provider 可配置（ericai / openai 兼容的国内模型），业务只拿 BaseChatModel
@@ -69,3 +70,6 @@ Phase 0.1 — /match 缓存重构：**代码完成、本地验证通过，待用
 ## Errors Encountered
 | Error | Attempt | Resolution |
 |-------|---------|------------|
+| 本机 `docker compose` 不支持 compose 子命令，`docker-compose` v1 又不支持顶层 `name` | 1–2 | 用 YAML 解析和镜像级检查覆盖本地语法/运行验证；EWS 的 Compose v2 部署时再跑 `config` |
+| nginx:alpine 拉取 Docker Hub 超时 | 1 | 属外网镜像拉取问题；改用本机已有 nginx/项目镜像或在 EWS 构建时执行 `nginx -t` |
+| backend 首次镜像构建 120s 超时 | 1 | pip 首次下载依赖尚未完成；延长构建超时后重试，复用 Docker 层缓存 |

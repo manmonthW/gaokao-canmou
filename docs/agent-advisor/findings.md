@@ -46,6 +46,9 @@
 | 返回值契约不变（`_prepare_candidates` 签名与五元组） | match / sensitivity / refresh 三个调用方零改动，降低回归面 |
 | 保留旧库降级分支（schema_missing） | 本次只修缓存，不扩大改动；迁移体系改造另排期 |
 | `gc.freeze()` 放在缓存建好之后 | 有对照实验支撑；单元数据无循环引用，淘汰后照常由引用计数释放 |
+| 方案体检以后端 `plan_analysis.py` 为在线权威 | Agent 与工作台必须共用确定性规则；前端旧实现暂留作断网降级，后续稳定后可删除 |
+| 生产配置 fail closed | `APP_ENV=production` 时拒绝 `CORS=*` 和弱 JWT，避免部署遗漏静默上线 |
+| Phase 0 只预留 nginx Agent 限流 | Agent 接口尚未创建；Phase 1 还需按登录用户做任务/Token 级限流与全局预算 |
 
 ## Issues Encountered
 | Issue | Resolution |

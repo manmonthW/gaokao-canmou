@@ -770,6 +770,8 @@ export interface MatchResponse {
   excluded_re?: number
   subject_requirements_loaded?: boolean
   error?: string
+  /** 限制类错误码：category_unsupported = 艺术/体育类不做智能匹配 */
+  error_code?: string
 }
 
 /** 分档可信度说明（A2）：向用户公开分档方法与回测依据 */
@@ -806,6 +808,7 @@ export interface RefreshSnapshotsResponse {
   data_version: string | null
   items: MatchCandidate[]
   error?: string
+  error_code?: string
 }
 
 /** P1 线差法估位响应（备考期） */
@@ -918,6 +921,15 @@ export interface VolunteerPlan {
   entries: PlanEntry[]
   /** 冲稳保配比基线（体检与模板用）：冲击 36/29/35、均衡 20/50/30、稳妥 10/55/35 */
   strategy?: PlanStrategy
+}
+
+export interface PlanAnalysis {
+  counts: Record<RiskLabel, number>
+  total: number
+  warnings: string[]
+  notes: string[]
+  ok: boolean
+  issues: number
 }
 
 // ---- 热门大学介绍（每日一校卡片）----

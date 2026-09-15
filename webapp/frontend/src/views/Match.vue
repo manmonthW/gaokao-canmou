@@ -27,6 +27,8 @@ const meta = ref<any>(null)
 const data = ref<MatchResponse | null>(null)
 const loading = ref(false)
 const error = ref<string | null>(null)
+// 后端限制类（如艺术/体育类不做智能匹配）以提示呈现，不当作报错
+const errorCode = ref<string | null>(null)
 
 // 档案摘要条：默认折叠为只读，点「修改」才展开表单
 const editingProfile = ref(false)
@@ -131,6 +133,7 @@ const sensRank = computed(() =>
 async function runMatch(resetPage = true) {
   if (resetPage) page.value = 1
   error.value = null
+  errorCode.value = null
   sens.value = null // 条件变化后旧试算作废（A3）
   if (isInterval.value) {
     if (!intervalValid.value) {
@@ -145,7 +148,7 @@ async function runMatch(resetPage = true) {
   }
   loading.value = true
   try {
-    data.value = await api.match({
+    const resp = await api.match({
       year: profile.value.year,
       category: profile.value.category,
       subject: profile.value.subject,
@@ -172,7 +175,14 @@ async function runMatch(resetPage = true) {
       page: page.value,
       page_size: PAGE_SIZE,
     })
-    if (data.value?.error) error.value = data.value.error
+    if (resp.error) {
+      // 错误响应不含 totals/items，不能进入结果区渲染
+      error.value = resp.error
+      errorCode.value = resp.error_code ?? null
+      data.value = null
+    } else {
+      data.value = resp
+    }
   } catch (e) {
     error.value = (e as Error).message
   } finally {
@@ -453,7 +463,22 @@ onMounted(async () => {
       <span class="pref-bar__hint">仅影响同档内排序与过滤，不改变冲/稳/保判定</span>
     </div>
 
-    <el-alert v-if="error" type="error" :title="error" show-icon :closable="false" class="card" />
+    <el-alert
+      v-if="error && errorCode === 'category_unsupported'"
+      type="warning"
+      show-icon
+      :closable="false"
+      class="card"
+    >
+      <template #title>{{ profile.category }}暂不支持智能匹配</template>
+      <p class="unsupported__text">{{ error }}</p>
+      <p class="unsupported__links">
+        <RouterLink to="/search/school">去院校查询</RouterLink>
+        <RouterLink to="/datacenter">去数据中心看原始录取记录</RouterLink>
+        <el-button link type="primary" @click="editingProfile = true">修改考生类别</el-button>
+      </p>
+    </el-alert>
+    <el-alert v-else-if="error" type="error" :title="error" show-icon :closable="false" class="card" />
 
     <template v-if="data">
       <!-- 风险档计数 -->
@@ -982,6 +1007,9 @@ onMounted(async () => {
 .pg { display: flex; justify-content: flex-end; margin-top: var(--space-3); }
 .ctx-alert { line-height: 1.7; }
 .subj-note { margin: 0 0 var(--space-3); font-size: var(--text-sm); color: var(--color-text-secondary); }
+.unsupported__text { margin: 4px 0 var(--space-2); line-height: 1.7; }
+.unsupported__links { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2) var(--space-4); margin: 0; }
+.unsupported__links a { color: var(--color-primary); font-weight: 500; }
 .note-line { margin: 4px 0; font-size: var(--text-sm); color: var(--color-text-secondary); line-height: 1.7; }
 .note-line b { color: var(--color-text); font-weight: 600; }
 .note-line--muted { color: var(--color-text-muted); font-size: var(--text-xs); }

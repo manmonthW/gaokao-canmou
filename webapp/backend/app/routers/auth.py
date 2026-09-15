@@ -8,11 +8,12 @@
 """
 import json
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel, EmailStr, Field, field_validator
 
 from app import user_db
 from app.services import auth as auth_svc
+from app.rate_limit import auth_limiter
 
 router = APIRouter(tags=["auth"])
 
@@ -60,7 +61,8 @@ class UserDataReq(BaseModel):
 # ---------------- 路由 ----------------
 
 @router.post("/auth/register", response_model=TokenOut)
-async def register(req: RegisterReq):
+async def register(req: RegisterReq, request: Request):
+    await auth_limiter.check(request)
     email = req.email.lower()
     if await user_db.email_exists(email):
         raise HTTPException(status.HTTP_409_CONFLICT, "该邮箱已注册")
@@ -77,7 +79,8 @@ async def register(req: RegisterReq):
 
 
 @router.post("/auth/login", response_model=TokenOut)
-async def login(req: LoginReq):
+async def login(req: LoginReq, request: Request):
+    await auth_limiter.check(request)
     user = await user_db.get_user_by_login(req.login.strip())
     # 统一错误信息，避免账号枚举
     if user is None or not auth_svc.verify_password(req.password, user["password_hash"]):

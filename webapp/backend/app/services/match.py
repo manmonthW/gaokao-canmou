@@ -191,6 +191,26 @@ MATCH_CONFIG = {
 
 RISK_ORDER = ["保", "稳", "冲", "高波动", "数据不足"]
 
+# 智能匹配只支持普通类（PRODUCT.md：普通类算法不直接套用于艺术类或体育类；
+# 首版艺术/体育类仅提供历史查询 + 限制提示）。艺术/体育类按文化与专业成绩综合计分投档，
+# 库内也缺少可比位次（艺术类 2,123 行仅 5 行有位次），拿普通类的位次分档去判冲稳保会误导。
+MATCH_CATEGORIES = ("普通类",)
+
+
+def _category_unsupported(category: str, examinee: Optional[dict] = None) -> Optional[dict]:
+    """非普通类返回统一的限制说明（error_code 供前端渲染为提示而非报错），否则 None。"""
+    if category in MATCH_CATEGORIES:
+        return None
+    out = {
+        "error": (f"{category}暂不支持智能匹配：{category}按文化成绩与专业成绩综合计分投档，"
+                  "与普通类的全省位次不可直接比较，本站不对其做冲/稳/保分档。"
+                  "可在「院校查询」或「数据中心 · 原始录取记录」查看历年投档数据。"),
+        "error_code": "category_unsupported",
+    }
+    if examinee is not None:
+        out["examinee"] = examinee
+    return out
+
 # P5 偏好最小版：同档内重排依据（仅改展示顺序，不改资格与分档）
 CITY_TIER_ORDER = ["一线", "新一线", "二线", "三线", "四线", "五线"]
 PREF_SORT_OPTIONS = {"certainty", "level", "city", "major"}
@@ -1217,6 +1237,9 @@ async def sensitivity(
 ):
     """A3 敏感度一键试算：位次 ±5%/±10% 时同一候选集的分档变化。"""
     cfg = cfg or MATCH_CONFIG
+    blocked = _category_unsupported(category)
+    if blocked:
+        return blocked
     rank = await _resolve_rank(year, category, subject, rank, score)
     if rank is None or rank <= 0:
         return {"error": "请提供有效位次（正整数），或有效的分数以便反查位次。"}
@@ -1258,6 +1281,9 @@ async def refresh_snapshots(
     按 (院校代码, 专业代码/专业名, 批次) 逐单元用最新全量数据重算，
     不应用偏好筛选；首选科目硬约束与 match 一致。"""
     cfg = cfg or MATCH_CONFIG
+    blocked = _category_unsupported(category)
+    if blocked:
+        return blocked
     if rank_lo is not None and rank_hi is not None:
         rank = rank_hi  # 与 match 区间模式主判定一致（悲观上界）
     rank = await _resolve_rank(year, category, subject, rank, score)
@@ -1363,6 +1389,11 @@ async def match(
     """普通类智能匹配主入口。P1：rank_lo/rank_hi 给定时按区间模式（备考期估位）；
     P5：pref_sort 只影响同档内展示顺序（certainty/level/city）。"""
     cfg = cfg or MATCH_CONFIG
+    blocked = _category_unsupported(category, {
+        "year": year, "category": category, "subject": subject,
+        "batch": batch, "score": score, "rank": rank})
+    if blocked:
+        return blocked
     if pref_sort and pref_sort not in PREF_SORT_OPTIONS:
         pref_sort = None
 

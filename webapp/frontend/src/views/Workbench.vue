@@ -1,11 +1,11 @@
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { api } from '@/api/client'
 import { useProfile } from '@/composables/useProfile'
 import { usePlanner, STRATEGY_BASELINES, toSnapshot, candidateId } from '@/composables/usePlanner'
 import { useIsMobile } from '@/composables/useBreakpoint'
-import type { CandidateSnapshot, PlanEntry, PlanStrategy, RiskLabel, VolunteerPlan } from '@/types'
+import type { CandidateSnapshot, PlanAnalysis, PlanEntry, PlanStrategy, RiskLabel, VolunteerPlan } from '@/types'
 import DataStatusBanner from '@/components/DataStatusBanner.vue'
 import StepGuide from '@/components/StepGuide.vue'
 
@@ -104,7 +104,33 @@ const activePlanId = ref<string>(plans.value[0]?.id || '')
 const activePlan = computed<VolunteerPlan | null>(
   () => plans.value.find((p) => p.id === activePlanId.value) || null,
 )
-const analysis = computed(() => (activePlan.value ? planner.analyzePlan(activePlan.value) : null))
+const analysis = ref<PlanAnalysis | null>(null)
+let analysisRequest = 0
+const analysisPayload = computed(() => {
+  const plan = activePlan.value
+  if (!plan) return null
+  return {
+    data_version: plan.data_version,
+    strategy: plan.strategy ?? '均衡',
+    entries: plan.entries,
+  }
+})
+watch(() => JSON.stringify(analysisPayload.value), async (serialized) => {
+  const requestId = ++analysisRequest
+  if (!serialized) {
+    analysis.value = null
+    return
+  }
+  const payload = JSON.parse(serialized) as Record<string, unknown>
+  try {
+    const result = await api.planAnalyze(payload)
+    if (requestId === analysisRequest) analysis.value = result
+  } catch {
+    // Keep the workbench usable during a transient API outage; the backend remains authoritative online.
+    const plan = activePlan.value
+    if (requestId === analysisRequest && plan) analysis.value = planner.analyzePlan(plan)
+  }
+}, { immediate: true })
 // 体检/模板的策略基线选择（旧方案无 strategy 时默认均衡型）
 const planStrategy = computed<PlanStrategy>({
   get: () => activePlan.value?.strategy ?? '均衡',

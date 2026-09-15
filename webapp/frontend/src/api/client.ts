@@ -84,6 +84,7 @@ import type {
   HotSchoolCategory,
   HotSchool,
   DataStatusMatrix,
+  PlanAnalysis,
 } from '@/types'
 
 export const api = {
@@ -153,6 +154,8 @@ export const api = {
   // 工作台「刷新到最新数据」：旧方案快照补新年 yearly/位次/分档
   matchRefresh: (payload: Record<string, unknown>) =>
     sendJson<RefreshSnapshotsResponse>('POST', '/match/refresh', payload),
+  planAnalyze: (payload: Record<string, unknown>) =>
+    sendJson<PlanAnalysis>('POST', '/plan/analyze', payload),
   // ---- 热门大学介绍 ----
   hotSchoolCategories: () =>
     getJson<{ categories: HotSchoolCategory[]; total: number }>('/hot-schools/categories'),

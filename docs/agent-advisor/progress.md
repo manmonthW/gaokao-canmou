@@ -50,3 +50,20 @@
 |-----------|-------|---------|------------|
 | 2026-09-15 | 新旧输出 12 组不一致 | 1 | 结构化 diff 定位：城市 facet 并列项顺序 + 层次筛选总数 + 艺术类条数 |
 | 2026-09-15 | 同上 | 2 | 改用「旧代码每次清空缓存」为基线 → 只剩 2 组；确认为旧 bug（findings.md） |
+
+### Phase 0.2：安全与 Agent 服务化前置
+- **Status:** 代码完成，本地验证通过；尚未部署 EWS
+- Actions taken:
+  - 艺术类/体育类在 match/sensitivity/refresh 入口统一拦截，不再套用普通类冲稳保算法；前端显示限制提示；
+  - 生产配置强制明确 CORS Origin 和至少 32 字符 JWT secret；compose 改由部署环境注入只读 DSN/JWT/CORS；
+  - backend 镜像不再复制本地 data，切换到 UID/GID 10001；`.dockerignore` 排除 data 与 `.env`；
+  - nginx 增加通用 API 限流和 Agent 路径预留限流；登录/注册增加应用层滑动窗口限流；
+  - 将方案体检确定性规则迁到 `services/plan_analysis.py`，新增 `/api/v1/plan/analyze`；工作台在线使用后端结果，网络故障时本地规则降级。
+- Validation:
+  - `python3 -m pytest tests/ -q`：67 passed；
+  - `npm run build`：通过（保留既有 1.23 MB 主 chunk 警告）；
+  - `git diff --check`：通过；
+  - 生产配置测试：明确 Origin + 强 JWT 可启动，`CORS=*` 或短 JWT 均按预期拒绝；
+  - backend 镜像构建通过，容器 UID/GID 均为 10001，`/app/data` 可写且镜像内不含本地数据库；
+  - compose YAML 解析与关键生产环境字段检查通过。本机无 Compose v2，完整 `docker compose config` 留待 EWS；
+  - nginx 镜像因 Docker Hub 拉取超时未能本地执行 `nginx -t`，部署前仍需在 EWS 验证。
