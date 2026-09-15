@@ -261,6 +261,20 @@ psql -U gaokao    -h localhost -d gaokao -f backend/migrations/0014_major_streng
 
 ---
 
+## 🔄 AI 参谋助手（Agentic）— 进行中（2026-09-15 起）
+
+规划见 **`docs/agent-advisor-plan.md`**；进度跟踪见 **`docs/agent-advisor/`**
+（`task_plan.md` 阶段与状态 / `findings.md` 发现与决策 / `progress.md` 会话日志与测试结果），新会话先读这三份。
+已定：邀请制内测；模型必须可替换（为国内已备案模型留路）；先修 /match 缓存再做 Agent。
+
+- ✅ **阶段 0.1 /match 缓存重构**（待提交/部署）：单元集合按「数据版本+类别/学科类/批次/考生年」缓存，
+  分档与筛选每次现算、CPU 段进线程池、同键单飞、`gc.freeze()`。换位次/换筛选 3.3–5.0s → 0.26–0.43s；
+  冷请求不再卡死事件循环（1.4–3.1s → <0.2s）。顺带修复层次筛选被局部变量覆盖的旧 bug
+  （层次筛选静默失效、艺术类匹配恒为 0 条）。
+- ⬜ 阶段 0.2 其余前置修复 → 0.3 模型接入技术验证 → 阶段 1 MVP。
+
+---
+
 ## 六、下一步建议
 按第一性评审优先级：**D1 补 2023/2024 录取数据**仍是最高优先（分档可信化先决条件；四年数据可将 margin 回测对扩到 3 对，P1 估位也能扩为多年参照）。算法层 A1–A4 与产品层 P1–P6 均已于 2026-08-08 落地（见 `docs/changelog-2026-08-08-a1-a4.md` / `docs/changelog-2026-08-08-p1-p6.md`）；2027 官方选科要求发布后运行 `load_subject_requirements.py` 即自动启用硬过滤；新数据入库后需重跑 `webapp/scripts/run_backtest.sh` 刷新 CLASSIFICATION_NOTE 固化数字；**2027 年 8 月录取结束后启动 P4 回填收集**（正式启用前先清空冒烟写入的测试行）。
 
