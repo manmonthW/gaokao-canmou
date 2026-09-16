@@ -120,6 +120,7 @@ def plan_node(state: AgentState) -> dict[str, Any]:
         "task_spec": spec.model_dump(),
         "plan": [step.model_dump() for step in plan],
         "coverage": [],
+        "clarify": spec.clarification,
     }
 
 
@@ -154,6 +155,12 @@ def _collect_route(state: AgentState) -> str:
     if state.get("intent") == "find_options" and completion_issues(state):
         return "fallback"
     return "synthesize"
+
+
+def _plan_route(state: AgentState) -> str:
+    if state.get("clarify"):
+        return "clarify"
+    return _intent_route(state)
 
 
 async def synthesize_guarded_node(state: AgentState) -> dict[str, Any]:
@@ -222,7 +229,7 @@ def build_advisor_graph():
     g.add_edge("clarify", END)
     g.add_conditional_edges(
         "plan",
-        _intent_route,
+        _plan_route,
         {
             "find_options": "find_options",
             "explain_unit": "explain_unit",

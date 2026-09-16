@@ -22,8 +22,8 @@ from app.agent.prompts import PROMPTS_VERSION
 logger = logging.getLogger(__name__)
 
 _SCHEMA_VERSION = 1
-_GRAPH_VERSION = "2026-09-16.2"
-_TOOLSET_VERSION = "2026-09-16.2"
+_GRAPH_VERSION = "2026-09-16.3"
+_TOOLSET_VERSION = "2026-09-16.3"
 _TERMINAL = {"ready", "failed", "timeout", "cancelled"}
 _tasks: set[asyncio.Task] = set()
 _semaphore: asyncio.Semaphore | None = None

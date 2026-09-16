@@ -528,6 +528,94 @@ def test_find_options_failed_scope_returns_explicit_partial_result(monkeypatch):
     assert model.calls == 1
 
 
+def test_find_options_compares_each_city_with_common_filters(monkeypatch):
+    seen = []
+
+    async def fake_match(**kwargs):
+        seen.append(kwargs)
+        return {"items": [{"school_name": f"{kwargs['city']}某大学", "major_name": "计算机类"}]}
+
+    monkeypatch.setattr(match, "match", fake_match)
+    _install_locate(monkeypatch)
+    answer = json.dumps(
+        {
+            "summary": "已比较两个城市。",
+            "sections": [
+                {"title": "沈阳", "body": "已检索沈阳。", "evidence_ids": ["E2"]},
+                {"title": "大连", "body": "已检索大连。", "evidence_ids": ["E3"]},
+            ],
+            "recommended_units": [], "caveats": [], "follow_ups": [], "needs_clarification": False,
+        },
+        ensure_ascii=False,
+    )
+    _install_model(
+        monkeypatch,
+        [_intent_json("find_options", {"city": ["沈阳", "大连"], "major_keyword": "计算机"}), answer],
+    )
+    out = _run(
+        {
+            "question": "比较沈阳和大连的计算机专业",
+            "profile": {"year": 2025, "category": "普通类", "subject": "物理", "batch": "本科批", "rank": 12013},
+        }
+    )
+
+    assert [(item["city"], item["major_keyword"]) for item in seen] == [
+        ("沈阳", "计算机"), ("大连", "计算机"),
+    ]
+    assert out["task_spec"]["requested_output"] == "comparison"
+    assert [item["key"] for item in out["coverage"]] == ["city:沈阳", "city:大连"]
+
+
+def test_ambiguous_comparison_clarifies_before_tools(monkeypatch):
+    model = _install_model(
+        monkeypatch,
+        [_intent_json("find_options", {"city": ["沈阳", "大连"], "major_keyword": ["计算机", "临床医学"]})],
+    )
+    out = _run(
+        {
+            "question": "比较沈阳、大连的计算机和临床医学专业",
+            "profile": {"year": 2025, "category": "普通类", "subject": "物理", "batch": "本科批", "rank": 12013},
+        }
+    )
+
+    assert "按哪个维度" in out["clarify"]
+    assert out.get("ledger").all() == []
+    assert model.calls == 1
+
+
+def test_short_follow_up_replans_from_history(monkeypatch):
+    seen = []
+
+    async def fake_match(**kwargs):
+        seen.append(kwargs["city"])
+        return {"items": []}
+
+    monkeypatch.setattr(match, "match", fake_match)
+    _install_locate(monkeypatch)
+    answer = json.dumps(
+        {
+            "summary": "已补充比较大连。",
+            "sections": [{"title": "结果", "body": "已完成检索。", "evidence_ids": ["E2"]}],
+            "recommended_units": [], "caveats": [], "follow_ups": [], "needs_clarification": False,
+        },
+        ensure_ascii=False,
+    )
+    _install_model(monkeypatch, [_intent_json("find_options", {"city": "大连"}), answer])
+    out = _run(
+        {
+            "question": "那大连呢",
+            "history": [
+                {"role": "user", "content": "推荐沈阳的计算机专业"},
+                {"role": "assistant", "content": "已给出沈阳候选。"},
+            ],
+            "profile": {"year": 2025, "category": "普通类", "subject": "物理", "batch": "本科批", "rank": 12013},
+        }
+    )
+
+    assert seen == ["沈阳", "大连"]
+    assert out["task_spec"]["replanned_from_history"] is True
+
+
 # ----------------------------- 8) route_intent 解析失败 -----------------------------
 
 def test_route_intent_unparseable_clarifies(monkeypatch):
