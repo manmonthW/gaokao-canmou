@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import os
 import sqlite3
 import time
@@ -12,10 +13,13 @@ from datetime import datetime, timezone
 from typing import Any
 
 from fastapi.concurrency import run_in_threadpool
+from fastapi.encoders import jsonable_encoder
 
 from app.agent import config
 from app.agent.graphs.advisor import build_advisor_graph
 from app.agent.prompts import PROMPTS_VERSION
+
+logger = logging.getLogger(__name__)
 
 _SCHEMA_VERSION = 1
 _GRAPH_VERSION = "2026-09-16.1"
@@ -220,7 +224,7 @@ def _finish(job_id: str, status: str, *, result=None, error_code=None, error_mes
         conn.execute(
             """UPDATE agent_jobs SET status=?, result_json=?, error_code=?, error_message=?,
                token_total=?, duration_ms=?, finished_at=? WHERE id=?""",
-            (status, json.dumps(result, ensure_ascii=False) if result is not None else None,
+            (status, json.dumps(jsonable_encoder(result), ensure_ascii=False) if result is not None else None,
              error_code, error_message, token_total, duration_ms, _now(), job_id),
         )
 
@@ -285,6 +289,7 @@ async def _run(job_id: str, payload: dict[str, Any]) -> None:
                                 duration_ms=int((time.monotonic() - started) * 1000))
         await run_in_threadpool(_append_event, job_id, "timeout", "分析超时")
     except Exception:  # noqa: BLE001 - only sanitized error reaches persistent user-visible state
+        logger.exception("Agent job %s failed", job_id)
         await run_in_threadpool(_finish, job_id, "failed", error_code="internal_error",
                                 error_message="参谋服务暂时不可用，请稍后重试",
                                 duration_ms=int((time.monotonic() - started) * 1000))

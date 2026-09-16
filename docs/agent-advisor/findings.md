@@ -114,6 +114,14 @@ sol/luna/terra 同一问题对比（用三句话解释平行/顺序志愿区别�
 
 验证：后端 `115 passed`；前端 build 通过；选校 30 + 解读 15 + 越界/攻击 10 共 55 条，ID 唯一且断言结构完整。真实模型质量门槛与 EWS HTTPS E2E 尚未执行。
 
+## Phase 1 真实模型与 EWS 验收结论（2026-09-16）
+- **原生 structured output 可用**：EricAI `se-gpt-5.6-sol` 可使用 `with_structured_output(..., method="json_schema")` 直接满足严格 `AdvisorAnswer` 契约；未知/截断/空响应仍必须统一走确定性安全降级，不能猜网关响应字段。
+- **推荐集合必须由证据决定**：模型只写解释，`find_options` 的 `recommended_units` 从 `search_candidates` 证据账本确定性投影。否则即使单次答案正确，同题五次的模型选取仍会漂移。
+- **模型 slots 不能直接成为严格检索条件**：同一句“辽宁省内稳档”可被模型抽成 `province=辽宁省内`、`risk=稳档` 等服务不支持的值，导致候选为空。可选筛选只接受可信结构化 profile；模型 slots 保留为语义提示，不下推到确定性匹配服务。
+- **稳定性采用严格交并比**：五次推荐集合的共同交集除以总并集，而非宽松的平均两两重合。最终实测 100%。
+- **序列化边界要覆盖数据库类型**：match 证据包含 PostgreSQL `Decimal`，标准库 `json.dumps` 会在任务完成落库时失败。任务持久化统一先过 FastAPI `jsonable_encoder`，测试覆盖 Decimal，正式域名复测成功。
+- §13.3 最终结果：55/55；意图/工具/拒答均 100%；降级 0%；数字溯源违规 0；P95 24.20s；五次稳定性 100%。
+
 ## Technical Decisions
 | Decision | Rationale |
 |----------|-----------|
@@ -134,6 +142,8 @@ sol/luna/terra 同一问题对比（用三句话解释平行/顺序志愿区别�
 | 主图而非单个大节点 | 确定性编排便于逐段降级与单测；synthesize/repair 包降级捕获（model_failed channel）使空答/拦截可路由到 fallback，不抛到调用端 |
 | Agent 任务先用 SQLite + 进程内执行 | 单机邀请制 MVP 的最小可靠闭环；状态和轮询持久化，重启明确失败，不使用会跨 worker 丢失的内存任务表；容量增长后再换外部队列 |
 | 空 allowlist 默认拒绝全部用户 | 邀请制必须 fail closed，避免只开 `AGENT_ENABLED` 就误向所有登录用户开放 |
+| 推荐单元从证据账本确定性投影 | 推荐事实不能由生成模型增删；同时满足可溯源和同题稳定性门槛 |
+| 模型生成 slots 不直接下推检索 | 自由文本值可能漂移或不符合 service 枚举；只信任结构化 profile 作为可选筛选来源 |
 
 ## Issues Encountered
 | Issue | Resolution |

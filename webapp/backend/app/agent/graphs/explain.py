@@ -32,6 +32,12 @@ def _parse_unit(state: dict[str, Any]) -> tuple[str, str] | None:
         if code and major:
             return code, major
 
+    if isinstance(raw, dict):
+        code = str(raw.get("school_code") or raw.get("code") or "").strip()
+        major = str(raw.get("major_name") or raw.get("major") or "").strip()
+        if code and major:
+            return code, major
+
     # 退而取结构化字段（page_context 直接给 school_code / major_name）
     code = str(page_ctx.get("school_code") or slots.get("school_code") or "").strip()
     major = str(

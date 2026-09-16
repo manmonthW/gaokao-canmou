@@ -95,8 +95,10 @@ async def find_options_collect_node(state: dict[str, Any]) -> dict[str, Any]:
         search_args["rank"] = rank
     if score is not None:
         search_args["score"] = score
+    # Optional filters must come from trusted structured context. Route-model
+    # slots are semantic hints and can vary or invent unsupported values.
     for key in ("province", "city", "level", "major_keyword", "risk"):
-        val = slots.get(key) or profile.get(key)
+        val = profile.get(key)
         if val:
             search_args[key] = val
 

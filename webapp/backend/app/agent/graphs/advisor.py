@@ -26,6 +26,7 @@ from app.agent.graphs.common import (
     verify_node,
 )
 from app.agent.graphs.explain import explain_collect_node
+from app.agent.graphs.explain import _parse_unit
 from app.agent.graphs.find_options import find_options_collect_node
 from app.agent.guards import input_guard
 from app.agent.llm import make_model
@@ -79,6 +80,11 @@ async def route_intent_node(state: AgentState) -> dict[str, Any]:
     from langchain_core.messages import HumanMessage, SystemMessage
 
     from app.agent.graphs.common import _extract_content, _strip_code_fence
+
+    # A concrete page unit is authoritative context; do not ask the model to
+    # classify short follow-ups such as "为什么是稳档" without that signal.
+    if _parse_unit(state) is not None:
+        return {"intent": "explain_unit", "slots": dict(state.get("profile") or {})}
 
     question = state.get("question") or ""
     profile = state.get("profile") or {}

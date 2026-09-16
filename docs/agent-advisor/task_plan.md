@@ -9,8 +9,8 @@
 「AI 参谋助手」：邀请制内测、模型可替换（为国内已备案模型留路）、所有结论可溯源。
 
 ## Current Phase
-Phase 1 MVP — 第四批（前端 + 评测资产）：**代码完成、本地验证通过；未提交**
-下一步：配置邀请名单与 EricAI secret 后跑真实模型评测并部署 EWS 灰度
+Phase 1 MVP — 第四批（前端 + 评测资产）：**已部署 EWS，真实模型质量门槛和 HTTPS API E2E 全部通过；待提交**
+下一步：提交并推送本轮稳定性、持久化和验收产物
 
 ## 已确认的决策（2026-09-15，用户）
 | 决策 | 结论 |
@@ -97,9 +97,10 @@ Phase 1 MVP — 第四批（前端 + 评测资产）：**代码完成、本地�
 - [x] 匹配解读携带当前单元事实；桌面直接传 page_context，手机用 sessionStorage 跨路由传递
 - [x] Phase 1 评测资产 55 条：选校 30 + 解读 15 + 越界/攻击 10；JSON-compatible YAML，无新增生产依赖；静态完整性测试
 - [x] 本地验证：后端 115 passed；前端 build 通过；Agent 懒加载 JS 约 4.63KB gzip（Panel 3.67 + Drawer 0.47 + page 0.49），主包入口增量保持目标范围
-- [ ] 真实 se-gpt-5.6-sol 跑 55 条评测并按 §13.3 出报告（需要 EricAI 凭证/可访问环境）
-- [ ] EWS 白名单部署和 HTTPS 浏览器 E2E（需要部署凭证、allowlist、Azure secret 文件）
-- **Status:** 前端与离线评测资产完成；真实模型评测和部署待环境，**未提交**
+- [x] 真实 se-gpt-5.6-sol 跑 55 条评测并按 §13.3 出报告：55/55，工具 100%，拒答 100%，降级 0%，溯源违规 0，P95 24.20s
+- [x] 五次同题稳定性：严格推荐集合交集/并集 100%（门槛 ≥70%）
+- [x] EWS 白名单部署和正式 HTTPS 域名授权 API E2E：任务 ready、answer 非空、evidence=2
+- **Status:** 已部署 EWS 并完成上线验收；本地全量 122 passed，前端 build 通过，**待提交**
 
 ### Phase 2：方案体检 Agent（§16 阶段 2）
 - **Status:** pending
@@ -119,3 +120,4 @@ Phase 1 MVP — 第四批（前端 + 评测资产）：**代码完成、本地�
 | 第三批首次静态检查发现 `main.py` 路由缩进错误 | 1 | 修正缩进后用 `py_compile` 重跑 |
 | 系统 `python3` 未安装 Phase 1 的 LangChain/LangGraph 依赖 | 1 | 按 Phase 1 既有约定改用 `backend/.venv/bin/python` 执行 Agent 测试 |
 | FastAPI 0.141 的 `app.routes` 使用 `_IncludedRouter`，旧式直接枚举误判为路径未装配 | 1–3 | OpenAPI 显示四条路径；新增 ASGITransport 请求测试确认 `/api/v1/agent/jobs` 可达并返回预期 401 |
+| Agent 结果证据包含数据库 `Decimal`，SQLite JSON 持久化失败 | 1 | 在任务持久化边界用 FastAPI `jsonable_encoder` 统一转换，并增加 Decimal 回归测试；正式域名 E2E 复测通过 |

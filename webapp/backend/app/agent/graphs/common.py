@@ -13,6 +13,7 @@ import json
 from typing import Any
 
 from langchain_core.messages import HumanMessage, SystemMessage
+from pydantic import ValidationError
 
 from app.agent.contracts import AdvisorAnswer
 from app.agent.evidence import EvidenceLedger
@@ -69,9 +70,16 @@ async def _ainvoke_json(*, node: str, system: str, user: str) -> dict[str, Any]:
     空答按 §5.3 规则4 视为预算耗尽 → 抛 ModelEmptyError 供主图降级。
     解析失败也当作模型未产出有效结构 → 同样抛 ModelEmptyError（走修复/降级）。
     """
-    model = make_model(node=node)
+    model = make_model(node=node).with_structured_output(AdvisorAnswer, method="json_schema")
     messages = [SystemMessage(content=system), HumanMessage(content=user)]
-    resp = await model.ainvoke(messages)
+    try:
+        resp = await model.ainvoke(messages)
+    except Exception as exc:  # noqa: BLE001 - all model failures use the safe fallback
+        raise ModelEmptyError(f"{node} 模型调用失败：{type(exc).__name__}") from exc
+    if isinstance(resp, AdvisorAnswer):
+        return resp.model_dump()
+    if isinstance(resp, dict):
+        return resp
     raw = _extract_content(resp).strip()
     if not raw:
         raise ModelEmptyError(f"{node} 返回空内容（预算耗尽或网关拦截）。")
@@ -86,7 +94,10 @@ async def _ainvoke_json(*, node: str, system: str, user: str) -> dict[str, Any]:
 
 def _normalize_answer(parsed: dict[str, Any]) -> dict[str, Any]:
     """用 AdvisorAnswer 归一：补默认、丢多余键，产出稳定的 model_dump。"""
-    answer = AdvisorAnswer.model_validate(parsed)
+    try:
+        answer = AdvisorAnswer.model_validate(parsed)
+    except ValidationError as exc:
+        raise ModelEmptyError(f"模型输出不符合回答契约：{exc}") from exc
     return answer.model_dump()
 
 
@@ -156,9 +167,12 @@ def _verify_route(state: dict[str, Any]) -> str:
 
 def deliver_node(state: dict[str, Any]) -> dict[str, Any]:
     """§8.2 交付：程序追加免责声明（不交给模型写），产出最终 answer。"""
-    draft = state.get("draft") or {}
+    draft = dict(state.get("draft") or {})
+    if state.get("intent") == "find_options":
+        units, _ = _units_from_ledger(state["ledger"])
+        draft["recommended_units"] = [unit.model_dump() for unit in units]
     answer = append_disclaimer(draft)
-    return {"answer": answer}
+    return {"draft": draft, "answer": answer}
 
 
 def _units_from_ledger(ledger: EvidenceLedger):

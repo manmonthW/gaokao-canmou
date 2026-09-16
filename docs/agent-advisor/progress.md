@@ -192,3 +192,22 @@
 | git diff --check | 工作区补丁格式 | 无错误 | 通过 | ✅ |
 | 真实 EricAI eval | §13.3 质量门槛 | 达标 | 未运行：本地无生产凭证 | ⏳ |
 | EWS HTTPS E2E | 白名单用户完整问答 | 通过 | 未运行：需部署配置与 secret | ⏳ |
+
+### Phase 1 EWS 上线验收（2026-09-16）
+- **Status:** 已部署并通过 §13.3 全部门槛；待提交和推送。
+- 真实模型评测（`se-gpt-5.6-sol`）：55/55 完成，意图准确率 100%，工具选择 100%，攻击/越界拒答 100%，降级率 0%，数字溯源违规 0，P50/P95 9.94s/24.20s。
+- 稳定性：`find-01` 连续五次全部完成，严格推荐集合 intersection/union = 100%，门槛 ≥70%。
+- 稳定性修复：最终推荐单元由 `search_candidates` 证据账本确定性生成；可选检索筛选只接受可信结构化 profile，不把模型生成的自由文本 slots 下推到严格匹配服务。
+- 可靠性修复：路由可从嵌套 `page_context.unit` 确定性识别解读；structured output 使用原生 JSON schema；模型异常统一安全降级；断点续跑只跳过 completed case。
+- EWS：backend 已滚动重建并保持 healthy，EricAI secret 继续只读文件挂载；db 未重建。
+- 正式域名授权 API E2E 首次暴露 `Decimal is not JSON serializable`，修复为持久化边界 `jsonable_encoder` 后复测 job `19c7ba7907c044cf952d770c1e91e03f`：ready、answer 非空、2 条 evidence。
+- 验收产物：`real-results-final.jsonl`、`real-report-final.md`、`stability-results.json`、`stability-report.md` 已保存到本目录。
+
+## Final Validation（Phase 1）
+| Test | Actual | Status |
+|---|---|---|
+| 后端全量 pytest | 122 passed | ✅ |
+| 前端生产构建 | 成功；仅保留既有 chunk size / dynamic import 警告 | ✅ |
+| `git diff --check` | 无错误 | ✅ |
+| EWS backend health | healthy | ✅ |
+| 正式 HTTPS Agent API | 创建、轮询、结果持久化全链路 ready | ✅ |

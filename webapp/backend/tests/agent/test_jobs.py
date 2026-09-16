@@ -1,4 +1,5 @@
 import asyncio
+from decimal import Decimal
 
 from app.agent import jobs
 
@@ -63,6 +64,14 @@ def test_run_persists_result_events_and_owner_isolation(monkeypatch, tmp_path):
     assert [event["type"] for event in result["events"]] == ["queued", "running", "ready"]
     assert asyncio.run(jobs.get(job["id"], 2)) is None
     assert asyncio.run(jobs.get(job["id"], 1, after=result["events"][0]["seq"]))["events"][0]["type"] == "running"
+
+
+def test_finish_serializes_decimal_result(monkeypatch, tmp_path):
+    _configure(monkeypatch, tmp_path)
+    job = jobs._create(1, {"mode": "问答", "message": "test"})
+    jobs._finish(job["id"], "ready", result={"evidence": {"score": Decimal("612.5")}})
+    result = asyncio.run(jobs.get(job["id"], 1))
+    assert result["result"]["evidence"]["score"] == 612.5
 
 
 def test_cancel_pending_and_feedback(monkeypatch, tmp_path):

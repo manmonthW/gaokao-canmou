@@ -46,6 +46,9 @@ class _FakeModel:
             raise item
         return _FakeMessage(item)
 
+    def with_structured_output(self, schema, **kwargs):
+        return self
+
 
 def _install_model(monkeypatch, replies):
     """把假模型装到两处 make_model 引用（advisor 与 common），共享同一队列。"""
@@ -148,6 +151,30 @@ def test_find_options_full_path_delivers(monkeypatch):
     assert not out.get("issues")
 
 
+def test_invalid_answer_schema_falls_back(monkeypatch):
+    _install_locate(monkeypatch)
+    _install_search(
+        monkeypatch,
+        [{"school_name": "某大学", "major_name": "计算机科学与技术", "last_year_rank": 12000}],
+    )
+    invalid = json.dumps(
+        {
+            "summary": "推荐如下。",
+            "sections": [{"title": "推荐", "content": "字段名错误", "evidence_ids": ["E2"]}],
+        },
+        ensure_ascii=False,
+    )
+    _install_model(monkeypatch, [_intent_json("find_options", {}), invalid])
+    out = _run(
+        {
+            "question": "找几个合适的院校",
+            "profile": {"year": 2025, "category": "普通类", "subject": "物理", "batch": "本科批", "rank": 12013},
+        }
+    )
+    assert out["answer"]["recommended_units"][0]["school"] == "某大学"
+    assert any("降级" in caveat for caveat in out["answer"]["caveats"])
+
+
 # ----------------------------- 4) explain_unit 链路 -----------------------------
 
 def test_explain_unit_full_path_delivers(monkeypatch):
@@ -187,6 +214,55 @@ def test_explain_unit_full_path_delivers(monkeypatch):
     )
     assert out.get("clarify") is None
     assert DISCLAIMER in out["answer"]["caveats"]
+
+
+def test_explain_unit_accepts_nested_page_context(monkeypatch):
+    from app.agent.graphs.explain import _parse_unit
+
+    assert _parse_unit(
+        {
+            "page_context": {
+                "unit": {
+                    "school_code": "10145",
+                    "school_name": "东北大学",
+                    "major_name": "计算机类",
+                }
+            }
+        }
+    ) == ("10145", "计算机类")
+
+
+def test_nested_page_context_routes_to_explain_without_model_classification(monkeypatch):
+    async def fake_get_school_major(code, major_name, major_code=None, year=None, category=None):
+        return {"rows": [{"year": 2024, "rank": 12000}], "school_name": "东北大学"}
+
+    async def fake_get_school(code):
+        return {"name": "东北大学", "code": code}
+
+    async def fake_get_school_strength(code):
+        return {"tags": []}
+
+    monkeypatch.setattr(schools, "get_school_major", fake_get_school_major)
+    monkeypatch.setattr(schools, "get_school", fake_get_school)
+    monkeypatch.setattr(schools, "get_school_strength", fake_get_school_strength)
+    answer = json.dumps(
+        {
+            "summary": "该单元的历年情况如下。",
+            "sections": [{"title": "历年位次", "body": "2024 年位次约 12000。", "evidence_ids": ["E1"]}],
+            "recommended_units": [], "caveats": [], "follow_ups": [], "needs_clarification": False,
+        },
+        ensure_ascii=False,
+    )
+    model = _install_model(monkeypatch, [answer])
+    out = _run(
+        {
+            "question": "为什么这个专业是保档",
+            "profile": {"category": "普通类"},
+            "page_context": {"unit": {"school_code": "10145", "major_name": "计算机类"}},
+        }
+    )
+    assert out["intent"] == "explain_unit"
+    assert model.calls == 1
 
 
 # ----------------------------- 5) 修复回环 -----------------------------
@@ -285,6 +361,90 @@ def test_synthesize_empty_falls_back(monkeypatch):
     ans = out["answer"]
     assert any("降级" in c for c in ans["caveats"])
     assert ans["recommended_units"][0]["school"] == "某大学"
+
+
+def test_synthesize_exception_falls_back(monkeypatch):
+    _install_locate(monkeypatch)
+    _install_search(
+        monkeypatch,
+        [{"school_name": "某大学", "major_name": "计算机科学与技术", "last_year_rank": 12000}],
+    )
+    _install_model(monkeypatch, [_intent_json("find_options", {}), RuntimeError("upstream")])
+    out = _run(
+        {
+            "question": "找几个合适的院校",
+            "profile": {"year": 2025, "category": "普通类", "subject": "物理", "batch": "本科批", "rank": 12013},
+        }
+    )
+    assert out["model_failed"] is True
+    assert any("降级" in c for c in out["answer"]["caveats"])
+
+
+def test_find_options_deliver_uses_evidence_units(monkeypatch):
+    _install_locate(monkeypatch)
+    _install_search(
+        monkeypatch,
+        [{"school_name": "某大学", "major_name": "计算机科学与技术", "last_year_rank": 12000}],
+    )
+    answer = json.dumps(
+        {
+            "summary": "可关注以下候选。",
+            "sections": [{"title": "候选", "body": "检索到一个候选。", "evidence_ids": ["E2"]}],
+            "recommended_units": [],
+            "caveats": [],
+            "follow_ups": [],
+            "needs_clarification": False,
+        },
+        ensure_ascii=False,
+    )
+    _install_model(monkeypatch, [_intent_json("find_options", {}), answer])
+    out = _run(
+        {
+            "question": "找几个合适的院校",
+            "profile": {"year": 2025, "category": "普通类", "subject": "物理", "batch": "本科批", "rank": 12013},
+        }
+    )
+    assert out["answer"]["recommended_units"] == [
+        {
+            "school": "某大学",
+            "major": "计算机科学与技术",
+            "batch": None,
+            "rank_last": 12000,
+            "risk": None,
+            "evidence_ids": ["E2"],
+        }
+    ]
+
+
+def test_find_options_does_not_apply_model_generated_filters(monkeypatch):
+    seen = {}
+
+    async def fake_match(**kwargs):
+        seen.update(kwargs)
+        return {"items": []}
+
+    monkeypatch.setattr(match, "match", fake_match)
+    _install_locate(monkeypatch)
+    answer = json.dumps(
+        {
+            "summary": "暂无候选。",
+            "sections": [{"title": "结果", "body": "当前未检索到候选。", "evidence_ids": ["E2"]}],
+            "recommended_units": [], "caveats": [], "follow_ups": [], "needs_clarification": False,
+        },
+        ensure_ascii=False,
+    )
+    _install_model(
+        monkeypatch,
+        [_intent_json("find_options", {"province": "辽宁省内", "risk": "稳档"}), answer],
+    )
+    _run(
+        {
+            "question": "推荐省内稳档",
+            "profile": {"year": 2025, "category": "普通类", "subject": "物理", "batch": "本科批", "rank": 12013},
+        }
+    )
+    assert seen["province"] is None
+    assert seen["risk"] is None
 
 
 # ----------------------------- 8) route_intent 解析失败 -----------------------------
