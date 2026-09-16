@@ -33,7 +33,7 @@ onBeforeUnmount(advisor.stopPolling)
     </header>
 
     <main class="advisor-body">
-      <div v-if="!advisor.job.value && !advisor.error.value" class="advisor-intro">
+      <div v-if="!advisor.history.value.length && !advisor.job.value && !advisor.error.value" class="advisor-intro">
         <h2>先查数据，再给判断</h2>
         <p>可以问选校范围，也可以从匹配结果中追问某个院校专业为什么被分到这一档。</p>
         <div class="suggestions">
@@ -42,13 +42,22 @@ onBeforeUnmount(advisor.stopPolling)
         </div>
       </div>
 
+      <section v-if="advisor.history.value.length" class="conversation" aria-label="聊天记录">
+        <article v-for="(turn, index) in advisor.history.value" :key="`${turn.job_id || 'old'}-${index}`" :class="['message', turn.role]">
+          <span>{{ turn.role === 'user' ? '你' : '参谋' }}</span>
+          <div>
+            <AnswerView v-if="turn.answer" :answer="turn.answer" :evidence="[]" />
+            <p v-else>{{ turn.clarify || turn.content }}</p>
+          </div>
+        </article>
+      </section>
+
       <div v-if="advisor.events.value.length" class="timeline" aria-live="polite">
         <div v-for="event in advisor.events.value" :key="event.seq"><span></span>{{ event.message }}</div>
       </div>
       <el-alert v-if="advisor.error.value" :title="advisor.error.value" type="error" :closable="false" show-icon />
       <el-alert v-if="advisor.job.value?.error_message" :title="advisor.job.value.error_message" type="warning" :closable="false" show-icon />
-      <p v-if="advisor.job.value?.result?.clarify" class="clarify">{{ advisor.job.value.result.clarify }}</p>
-      <AnswerView v-if="advisor.job.value?.result?.answer" :answer="advisor.job.value.result.answer" :evidence="advisor.job.value.result.evidence || []" />
+      <div v-if="advisor.busy.value" class="current-turn">正在处理这一轮问题…</div>
       <div v-if="advisor.job.value?.status === 'ready' && !feedbackSent" class="feedback">
         <span>这次分析有帮助吗？</span>
         <el-button size="small" @click="sendFeedback(true)">有帮助</el-button>
@@ -72,6 +81,13 @@ onBeforeUnmount(advisor.stopPolling)
 .advisor-head small { color: var(--color-text-muted); margin-top: 2px; }
 .advisor-mark { width: 34px; height: 34px; display: grid; place-items: center; border-radius: var(--radius-sm); color: white; background: var(--color-primary); font-weight: 700; }
 .advisor-body { overflow-y: auto; padding: var(--space-5); display: flex; flex-direction: column; gap: var(--space-5); }
+.conversation { display: grid; gap: var(--space-4); }
+.message { display: grid; grid-template-columns: 44px minmax(0, 1fr); gap: var(--space-3); align-items: start; }
+.message > span { color: var(--color-text-muted); font-size: var(--text-sm); padding-top: 8px; }
+.message > div { min-width: 0; padding: var(--space-3) var(--space-4); border-radius: var(--radius-md); background: var(--color-bg-subtle); }
+.message.user > div { background: var(--color-primary-soft); }
+.message p { margin: 0; white-space: pre-wrap; line-height: 1.7; }
+.current-turn { color: var(--color-text-secondary); font-size: var(--text-sm); }
 .advisor-intro { margin: auto 0; padding: var(--space-8) var(--space-4); text-align: center; }
 .advisor-intro h2 { margin: 0 0 var(--space-3); }
 .advisor-intro p { color: var(--color-text-secondary); line-height: 1.7; }

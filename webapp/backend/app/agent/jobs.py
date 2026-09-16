@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import logging
 import os
@@ -22,10 +23,10 @@ from app.agent.prompts import PROMPTS_VERSION
 logger = logging.getLogger(__name__)
 
 _SCHEMA_VERSION = 1
-_GRAPH_VERSION = "2026-09-16.3"
-_TOOLSET_VERSION = "2026-09-16.3"
+_GRAPH_VERSION = "2026-09-16.4"
+_TOOLSET_VERSION = "2026-09-16.4"
 _TERMINAL = {"ready", "failed", "timeout", "cancelled"}
-_tasks: set[asyncio.Task] = set()
+_tasks: dict[str, asyncio.Task] = {}
 _semaphore: asyncio.Semaphore | None = None
 
 _SCHEMA = """
@@ -35,6 +36,7 @@ CREATE TABLE IF NOT EXISTS agent_jobs (
     status TEXT NOT NULL CHECK (status IN ('pending','running','ready','failed','timeout','cancelled')),
     mode TEXT NOT NULL,
     request_json TEXT NOT NULL,
+    request_fingerprint TEXT,
     result_json TEXT,
     error_code TEXT,
     error_message TEXT,
@@ -100,6 +102,13 @@ def _connect():
 def init_db() -> None:
     with _connect() as conn:
         conn.executescript(_SCHEMA)
+        columns = {row["name"] for row in conn.execute("PRAGMA table_info(agent_jobs)")}
+        if "request_fingerprint" not in columns:
+            conn.execute("ALTER TABLE agent_jobs ADD COLUMN request_fingerprint TEXT")
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_agent_jobs_fingerprint "
+            "ON agent_jobs(user_id, request_fingerprint)"
+        )
         now = _now()
         stale = conn.execute("SELECT id FROM agent_jobs WHERE status IN ('pending','running')").fetchall()
         conn.execute(
@@ -133,6 +142,11 @@ def is_allowed(user: Any) -> bool:
 
 def _row(row: sqlite3.Row | None) -> dict[str, Any] | None:
     return dict(row) if row else None
+
+
+def _fingerprint(payload: dict[str, Any]) -> str:
+    normalized = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(normalized.encode("utf-8")).hexdigest()
 
 
 def _find_active(user_id: int):
@@ -178,14 +192,16 @@ def _daily_tokens() -> int:
         ).fetchone()["n"]
 
 
-async def admission(user_id: int) -> tuple[str, dict[str, Any] | None]:
+async def admission(user_id: int, payload: dict[str, Any] | None = None) -> tuple[str, dict[str, Any] | None]:
     active, count, tokens = await asyncio.gather(
         run_in_threadpool(_find_active, user_id),
         run_in_threadpool(_hourly_count, user_id),
         run_in_threadpool(_daily_tokens),
     )
     if active:
-        return "active", active
+        if payload is None or active.get("request_fingerprint") == _fingerprint(payload):
+            return "active", active
+        return "conflict", active
     if count >= config.AGENT_USER_HOURLY_LIMIT:
         return "rate_limit", None
     if config.AGENT_DAILY_TOKEN_BUDGET and tokens >= config.AGENT_DAILY_TOKEN_BUDGET:
@@ -199,11 +215,11 @@ def _create(user_id: int, payload: dict[str, Any]) -> dict[str, Any]:
     with _connect() as conn:
         conn.execute(
             """INSERT INTO agent_jobs(
-                id,user_id,status,mode,request_json,graph_version,schema_version,
+                id,user_id,status,mode,request_json,request_fingerprint,graph_version,schema_version,
                 prompt_version,toolset_version,created_at)
-                VALUES (?,?,?,?,?,?,?,?,?,?)""",
+                VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
             (job_id, user_id, "pending", payload["mode"], json.dumps(payload, ensure_ascii=False),
-             _GRAPH_VERSION, _SCHEMA_VERSION, PROMPTS_VERSION, _TOOLSET_VERSION, now),
+             _fingerprint(payload), _GRAPH_VERSION, _SCHEMA_VERSION, PROMPTS_VERSION, _TOOLSET_VERSION, now),
         )
         conn.execute(
             "INSERT INTO agent_events(job_id,type,message,created_at) VALUES (?,?,?,?)",
@@ -215,8 +231,8 @@ def _create(user_id: int, payload: dict[str, Any]) -> dict[str, Any]:
 async def create(user_id: int, payload: dict[str, Any]) -> dict[str, Any]:
     job = await run_in_threadpool(_create, user_id, payload)
     task = asyncio.create_task(_run(job["id"], payload))
-    _tasks.add(task)
-    task.add_done_callback(_tasks.discard)
+    _tasks[job["id"]] = task
+    task.add_done_callback(lambda _task: _tasks.pop(job["id"], None))
     return job
 
 
@@ -239,14 +255,16 @@ def _set_running(job_id: str) -> bool:
 
 
 def _finish(job_id: str, status: str, *, result=None, error_code=None, error_message=None,
-            token_total=0, duration_ms=None):
+            token_total=0, duration_ms=None) -> bool:
     with _connect() as conn:
-        conn.execute(
+        cur = conn.execute(
             """UPDATE agent_jobs SET status=?, result_json=?, error_code=?, error_message=?,
-               token_total=?, duration_ms=?, finished_at=? WHERE id=?""",
+               token_total=?, duration_ms=?, finished_at=?
+               WHERE id=? AND status IN ('pending','running')""",
             (status, json.dumps(jsonable_encoder(result), ensure_ascii=False) if result is not None else None,
              error_code, error_message, token_total, duration_ms, _now(), job_id),
         )
+        return cur.rowcount == 1
 
 
 def _cancel_requested(job_id: str) -> bool:
@@ -270,8 +288,13 @@ async def _run(job_id: str, payload: dict[str, Any]) -> None:
     if _semaphore is None:
         _semaphore = asyncio.Semaphore(config.AGENT_MAX_CONCURRENCY)
     started = time.monotonic()
+    deadline = started + config.AGENT_JOB_TIMEOUT_SECONDS
     try:
-        async with _semaphore:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise asyncio.TimeoutError
+        await asyncio.wait_for(_semaphore.acquire(), timeout=remaining)
+        try:
             if not await run_in_threadpool(_set_running, job_id):
                 return
             await run_in_threadpool(_append_event, job_id, "running", "参谋正在查资料")
@@ -284,8 +307,11 @@ async def _run(job_id: str, payload: dict[str, Any]) -> None:
                 "history": payload.get("history") or [],
             }
             graph = build_advisor_graph()
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise asyncio.TimeoutError
             out = await asyncio.wait_for(
-                graph.ainvoke(state), timeout=config.AGENT_JOB_TIMEOUT_SECONDS
+                graph.ainvoke(state), timeout=remaining
             )
             if await run_in_threadpool(_cancel_requested, job_id):
                 await run_in_threadpool(_finish, job_id, "cancelled", error_code="cancelled",
@@ -299,15 +325,30 @@ async def _run(job_id: str, payload: dict[str, Any]) -> None:
                 "answer": out.get("answer"), "clarify": out.get("clarify"),
                 "evidence": _serialize_evidence(out),
             }
-            await run_in_threadpool(_finish, job_id, "ready", result=result,
-                                    token_total=token_total,
-                                    duration_ms=int((time.monotonic() - started) * 1000))
-            await run_in_threadpool(_append_event, job_id, "ready", "分析完成")
+            finished = await run_in_threadpool(
+                _finish, job_id, "ready", result=result, token_total=token_total,
+                duration_ms=int((time.monotonic() - started) * 1000),
+            )
+            if finished:
+                await run_in_threadpool(_append_event, job_id, "ready", "分析完成")
+        finally:
+            _semaphore.release()
     except asyncio.TimeoutError:
-        await run_in_threadpool(_finish, job_id, "timeout", error_code="timeout",
-                                error_message="分析超时，请缩小问题范围后重试",
-                                duration_ms=int((time.monotonic() - started) * 1000))
-        await run_in_threadpool(_append_event, job_id, "timeout", "分析超时")
+        finished = await run_in_threadpool(
+            _finish, job_id, "timeout", error_code="timeout",
+            error_message="分析超时，请缩小问题范围后重试",
+            duration_ms=int((time.monotonic() - started) * 1000),
+        )
+        if finished:
+            await run_in_threadpool(_append_event, job_id, "timeout", "分析超时")
+    except asyncio.CancelledError:
+        finished = await run_in_threadpool(
+            _finish, job_id, "cancelled", error_code="cancelled", error_message="任务已取消",
+            duration_ms=int((time.monotonic() - started) * 1000),
+        )
+        if finished:
+            await run_in_threadpool(_append_event, job_id, "cancelled", "任务已取消")
+        raise
     except Exception:  # noqa: BLE001 - only sanitized error reaches persistent user-visible state
         logger.exception("Agent job %s failed", job_id)
         await run_in_threadpool(_finish, job_id, "failed", error_code="internal_error",
@@ -385,7 +426,13 @@ def _cancel(job_id: str, user_id: int):
 
 
 async def cancel(job_id: str, user_id: int):
-    return await run_in_threadpool(_cancel, job_id, user_id)
+    state = await run_in_threadpool(_cancel, job_id, user_id)
+    if state == "cancelling":
+        task = _tasks.get(job_id)
+        if task is not None:
+            task.cancel()
+        return "cancelled"
+    return state
 
 
 def _feedback(job_id: str, user_id: int, helpful: bool, reason: str | None):

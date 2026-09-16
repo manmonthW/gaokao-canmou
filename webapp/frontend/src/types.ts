@@ -783,6 +783,9 @@ export interface AdvisorJob {
 export interface AdvisorHistoryTurn {
   role: 'user' | 'assistant'
   content: string
+  job_id?: string
+  answer?: AdvisorAnswer
+  clarify?: string
 }
 
 export interface MatchFacetItem {

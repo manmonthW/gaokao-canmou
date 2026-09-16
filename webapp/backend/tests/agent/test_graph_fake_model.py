@@ -195,7 +195,7 @@ def test_explain_unit_full_path_delivers(monkeypatch):
         {
             "summary": "某大学计算机科学与技术的历年情况如下。",
             "sections": [
-                {"title": "历年位次", "body": "2024 年位次约 12000。", "evidence_ids": ["E1"]}
+                {"title": "历年位次", "body": "2024 年位次约 12000。", "evidence_ids": ["E2"]}
             ],
             "recommended_units": [],
             "caveats": [],
@@ -209,7 +209,11 @@ def test_explain_unit_full_path_delivers(monkeypatch):
         {
             "question": "这个专业怎么样",
             "profile": {"year": 2025, "category": "普通类"},
-            "page_context": {"unit": "10001|计算机科学与技术|本科批"},
+            "page_context": {"unit": {
+                "school_code": "10001", "school_name": "某大学",
+                "major_code": "080901", "major_name": "计算机科学与技术",
+                "batch": "本科批", "risk": "稳", "risk_reason": "位次匹配",
+            }},
         }
     )
     assert out.get("clarify") is None
@@ -229,7 +233,7 @@ def test_explain_unit_accepts_nested_page_context(monkeypatch):
                 }
             }
         }
-    ) == ("10145", "计算机类")
+    ) == {"school_code": "10145", "school_name": "东北大学", "major_name": "计算机类"}
 
 
 def test_nested_page_context_routes_to_explain_without_model_classification(monkeypatch):
@@ -248,7 +252,7 @@ def test_nested_page_context_routes_to_explain_without_model_classification(monk
     answer = json.dumps(
         {
             "summary": "该单元的历年情况如下。",
-            "sections": [{"title": "历年位次", "body": "2024 年位次约 12000。", "evidence_ids": ["E1"]}],
+            "sections": [{"title": "历年位次", "body": "2024 年位次约 12000。", "evidence_ids": ["E2"]}],
             "recommended_units": [], "caveats": [], "follow_ups": [], "needs_clarification": False,
         },
         ensure_ascii=False,

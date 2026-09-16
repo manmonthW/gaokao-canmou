@@ -70,6 +70,12 @@ async def find_options_collect_node(state: dict[str, Any]) -> dict[str, Any]:
     subject = profile.get("subject") or slots.get("subject") or ""
     batch = profile.get("batch") or slots.get("batch") or ""
     year = profile.get("year") or slots.get("year")
+    missing = [
+        label for label, value in (("年份", year), ("科类", category), ("选科", subject), ("批次", batch))
+        if value in (None, "", 0)
+    ]
+    if missing:
+        return {"clarify": f"请先在考生档案中补充：{'、'.join(missing)}。"}
 
     # 1) 位次定位（有位次才取；locate 需要正整数位次）
     if rank is not None:
@@ -110,7 +116,10 @@ async def find_options_collect_node(state: dict[str, Any]) -> dict[str, Any]:
             result = await tools[step.tool].ainvoke({**search_args, **step.args})
             data = result.get("data") if isinstance(result, dict) else None
             items = data.get("items") if isinstance(data, dict) else None
-            step.status = "done" if items else "empty"
+            if isinstance(data, dict) and data.get("error"):
+                step.status = "failed"
+            else:
+                step.status = "done" if items else "empty"
             if isinstance(result, dict) and result.get("eid"):
                 step.evidence_ids = [str(result["eid"])]
         except Exception:  # noqa: BLE001 - failed scope is surfaced by coverage, not hidden

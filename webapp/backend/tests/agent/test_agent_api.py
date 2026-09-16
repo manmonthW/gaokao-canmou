@@ -29,7 +29,7 @@ def test_authorized_requires_switch_and_allowlist(monkeypatch):
 
 
 def test_create_reuses_active_job(monkeypatch):
-    async def fake_admission(user_id):
+    async def fake_admission(user_id, payload):
         return "active", {"id": "existing", "status": "running"}
 
     monkeypatch.setattr(agent.jobs, "admission", fake_admission)
@@ -39,7 +39,7 @@ def test_create_reuses_active_job(monkeypatch):
 
 
 def test_create_starts_new_job(monkeypatch):
-    async def fake_admission(user_id):
+    async def fake_admission(user_id, payload):
         return "ok", None
 
     async def fake_create(user_id, payload):

@@ -15,28 +15,26 @@ from app.agent.prompts import CLARIFY_GENERIC
 from app.agent.tools import build_tools
 
 
-def _parse_unit(state: dict[str, Any]) -> tuple[str, str] | None:
-    """从 page_context.unit 或 slots 里抽出（院校代码, 专业名）。
+def _parse_unit(state: dict[str, Any]) -> dict[str, Any] | None:
+    """从 page_context.unit 或 slots 里抽出完整院校专业上下文。
 
-    unit_id 约定：${school_code}|${major_code || major_name}|${batch}（与前端 candidateId 对齐）。
+    字符串 unit_id 的第二段可能是专业代码，不能安全当作专业名查询。
     这里只需前两段（院校代码、专业）就能取证；batch 由 profile/slots 回退。
     """
     page_ctx = state.get("page_context") or {}
     slots = state.get("slots") or {}
 
     raw = page_ctx.get("unit") or page_ctx.get("unit_id") or slots.get("unit")
-    if isinstance(raw, str) and "|" in raw:
-        parts = raw.split("|")
-        code = parts[0].strip()
-        major = parts[1].strip() if len(parts) > 1 else ""
-        if code and major:
-            return code, major
-
     if isinstance(raw, dict):
         code = str(raw.get("school_code") or raw.get("code") or "").strip()
         major = str(raw.get("major_name") or raw.get("major") or "").strip()
         if code and major:
-            return code, major
+            return dict(raw)
+
+    # Candidate IDs contain a major code, not a major name. They are insufficient
+    # for the exact historical lookup and must not be treated as names.
+    if isinstance(raw, str) and "|" in raw:
+        return None
 
     # 退而取结构化字段（page_context 直接给 school_code / major_name）
     code = str(page_ctx.get("school_code") or slots.get("school_code") or "").strip()
@@ -48,7 +46,7 @@ def _parse_unit(state: dict[str, Any]) -> tuple[str, str] | None:
         or ""
     ).strip()
     if code and major:
-        return code, major
+        return {"school_code": code, "major_name": major}
     return None
 
 
@@ -61,21 +59,27 @@ async def explain_collect_node(state: dict[str, Any]) -> dict[str, Any]:
     if parsed is None:
         return {"clarify": CLARIFY_GENERIC}
 
-    code, major = parsed
+    code = str(parsed.get("school_code") or parsed.get("code") or "").strip()
+    major = str(parsed.get("major_name") or parsed.get("major") or "").strip()
+    major_code = str(parsed.get("major_code") or "").strip() or None
     profile = state.get("profile") or {}
     ledger: EvidenceLedger = state["ledger"]
     tools = {t.name: t for t in build_tools(ledger, profile)}
 
-    year = profile.get("year")
     category = profile.get("category")
+
+    # The clicked match result is the authoritative evidence for its risk bucket.
+    ledger.add("selected_candidate", {"school_code": code, "major_name": major}, parsed)
 
     # 1) 单元历年分数/位次明细（必取）
     detail_args: dict[str, Any] = {"code": code, "major_name": major}
-    if year is not None:
-        detail_args["year"] = year
+    if major_code is not None:
+        detail_args["major_code"] = major_code
     if category is not None:
         detail_args["category"] = category
-    await tools["get_unit_detail"].ainvoke(detail_args)
+    detail = await tools["get_unit_detail"].ainvoke(detail_args)
+    if not detail.get("data"):
+        return {"clarify": "未找到这个院校专业的历史录取明细，请返回匹配结果重新选择。"}
 
     # 2) 院校画像（辅助解读，拿不到不阻断）
     try:

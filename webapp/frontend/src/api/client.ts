@@ -12,7 +12,7 @@ function authHeaders(): Record<string, string> {
 }
 
 export async function getJson<T>(path: string): Promise<T> {
-  const res = await fetch(`${ORIGIN}${PREFIX}${path}`, { headers: authHeaders() })
+  const res = await fetch(`${ORIGIN}${PREFIX}${path}`, { headers: authHeaders(), signal: AbortSignal.timeout(12_000) })
   if (!res.ok) {
     const body = await res.text().catch(() => '')
     throw new Error(`请求 ${path} 失败：HTTP ${res.status}${body ? ' ' + body.slice(0, 120) : ''}`)
@@ -25,12 +25,13 @@ async function sendJson<T>(method: string, path: string, payload: unknown): Prom
     method,
     headers: { 'Content-Type': 'application/json', ...authHeaders() },
     body: JSON.stringify(payload),
+    signal: AbortSignal.timeout(12_000),
   })
   if (!res.ok) {
     let msg = `HTTP ${res.status}`
     try {
       const j = await res.json()
-      if (j?.detail) msg = typeof j.detail === 'string' ? j.detail : JSON.stringify(j.detail)
+      if (j?.detail) msg = typeof j.detail === 'string' ? j.detail : j.detail.message || JSON.stringify(j.detail)
     } catch {
       /* ignore */
     }

@@ -46,14 +46,20 @@ def _authorized(user=Depends(current_user)):
 
 @router.post("/jobs", status_code=status.HTTP_202_ACCEPTED)
 async def create_job(req: CreateJobRequest, user=Depends(_authorized)):
-    decision, active = await jobs.admission(user["id"])
+    payload = req.model_dump()
+    decision, active = await jobs.admission(user["id"], payload)
     if decision == "active":
         return {"job_id": active["id"], "status": active["status"], "reused": True}
     if decision == "rate_limit":
         raise HTTPException(status.HTTP_429_TOO_MANY_REQUESTS, "每小时任务数已达上限")
     if decision == "budget":
         raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "今日参谋额度已用完，请明天再试")
-    job = await jobs.create(user["id"], req.model_dump())
+    if decision == "conflict":
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            {"code": "active_job", "job_id": active["id"], "message": "上一条问题仍在分析，请先取消或等待完成"},
+        )
+    job = await jobs.create(user["id"], payload)
     return {"job_id": job["id"], "status": job["status"], "reused": False}
 
 
