@@ -9,8 +9,8 @@
 「AI 参谋助手」：邀请制内测、模型可替换（为国内已备案模型留路）、所有结论可溯源。
 
 ## Current Phase
-Phase 0.3 — 模型接入技术验证：**已在 EWS 容器内验证通过（六项能力全过，探针已删）**
-下一步：进入 Phase 1 MVP（选校问答 + 单条解读）
+Phase 1 MVP — 第二批（LangGraph 主图 + 子图 A/C）：**代码完成、单测全过（本地）；未提交**
+下一步：等用户过目后进入第三批（接口 + 任务存储）
 
 ## 已确认的决策（2026-09-15，用户）
 | 决策 | 结论 |
@@ -56,7 +56,36 @@ Phase 0.3 — 模型接入技术验证：**已在 EWS 容器内验证通过（�
 - **Status:** 已完成（2026-09-16，在 EWS 容器内实测六项全过；探针本地/EWS 两份均删；详见 findings.md / progress.md）
 
 ### Phase 1：MVP——选校问答 + 单条解读（§16 阶段 1）
-- **Status:** pending
+分批交付（用户定 1A）：每批停下来等过目。默认 deployment=se-gpt-5.6-sol。
+
+#### 第一批：模型工厂 + 只读工具层 + 证据账本
+- [x] `agent/config.py` — Agent 专属配置（仅 env；`AGENT_ENABLED`/`LLM_PROVIDER`/Azure 连接参/`AGENT_DB_PATH`；生产 fail-closed）
+- [x] `agent/llm.py` — `make_model(*, node)` 产 `BaseChatModel`（ChatOpenAI + httpx.Auth）；`TokenProvider` 进程内缓存 token（120s 提前刷 + asyncio.Lock）；6 个节点参数；拒 minimal；带 tools 强制 reasoning=none；provider≠ericai raise NotImplementedError
+- [x] `agent/evidence.py` — `EvidenceLedger`（eid 自增 E1/E2…、add/get/all/render_for_prompt、长列表截断）
+- [x] `agent/contracts.py` — 回答契约（AdvisorAnswer 等）+ 7 个工具入参 schema（Pydantic v2）
+- [x] `agent/tools/` — 7 个只读工具（校验→调 service（进程内）→裁剪→写证据）；`build_tools(ledger, profile)`
+- [x] `requirements.txt` 补 `azure-identity>=1.19`
+- [x] 单测：`tests/agent/test_evidence.py`(7)、`test_llm_factory.py`(8)、`test_tools.py`(12) — 均不走网络/不碰真库
+- [x] 验证：`pytest tests/agent/ -q` 27 passed；`pytest tests/ -q` 94 passed（无回退，基线 67）；`make_model`/`build_tools` import 无错
+- **Status:** 代码完成、本地验证通过；**未提交**（等用户过目——1A 分批停）
+
+#### 第二批：LangGraph 主图 + 子图 A（选校问答）/ C（单条解读）
+- [x] `state.py` — `AgentState`（TypedDict, total=False）；events reducer 追加；新增 `model_failed` channel（synthesize/repair 空答转 fallback）
+- [x] `guards.py` — `input_guard`（注入/越界类别）、`verify_answer`（forbidden_phrase/missing_citation/invalid_citation/number_not_traceable/unit_not_in_evidence/status_omitted）、`append_disclaimer`（幂等）
+- [x] `graphs/common.py` — synthesize/repair/verify/deliver/fallback 节点；`_verify_route`（repairs<1）；`ModelEmptyError`；`_normalize_answer`
+- [x] `graphs/find_options.py`（子图A）/ `graphs/explain.py`（子图C）— 确定性取证（直接调 service，不走模型工具循环）；位次缺失置 clarify
+- [x] `graphs/advisor.py` — 主图：guard→load_context→route_intent→{子图/clarify/refuse}→synthesize→verify→{deliver/repair/fallback}；synthesize/repair 包降级捕获
+- [x] `prompts/` — ROUTE_INTENT_SYSTEM / CLARIFY_GENERIC / REFUSE_OUT_OF_SCOPE 等；PROMPTS_VERSION=`2026-09-16.1`
+- [x] `requirements.txt` 补 `langgraph>=1.2`（本地 1.2.11）
+- [x] 单测：`tests/agent/test_graph_fake_model.py`(9) — 假模型驱动全路由分支（guard 短路/位次门禁/正常链路/修复回环/降级/解析失败），不走真模型/不碰真库
+- [x] 验证：`pytest tests/agent/ -q` 36 passed（基线 27）；`pytest tests/ -q` 103 passed（基线 94，无回退）
+- **Status:** 代码完成、本地验证通过；**未提交**（等用户过目——1A 分批停）
+
+#### 第三批（待起）：接口 + 任务存储
+- [ ] jobs.py + agent.db 建表 / routers/agent.py
+
+#### 第四批（待起）：前端 + 评测
+- [ ] 前端抽屉/advisor 页 / 评测集
 
 ### Phase 2：方案体检 Agent（§16 阶段 2）
 - **Status:** pending

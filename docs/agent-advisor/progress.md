@@ -106,3 +106,52 @@
 | 选型 sol | sol | 可调 | 2.95s / 162 tok，输出最完整 | ✅ |
 | 选型 luna | luna | 可调 | 2.48s / 138 tok，最省/最快 | ✅ |
 | 选型 terra | terra | 可调 | 2.43s / 171 tok | ✅ |
+
+### Phase 1 第一批：模型工厂 + 只读工具层 + 证据账本
+- **Status:** 代码完成、本地单测全过；**未提交**（等用户过目——1A 分批停）
+- Actions taken：
+  - 新建 `webapp/backend/app/agent/` 包：`config.py`（Agent 专属 env 配置，生产 fail-closed）、`llm.py`（`make_model` + `TokenProvider` + `_Auth`）、`evidence.py`（`EvidenceLedger`）、`contracts.py`（回答契约 + 7 工具入参 schema）、`tools/__init__.py`（`build_tools` 绑 ledger+profile 的 7 个只读工具）
+  - `make_model` 复用 Phase 0.3 定论的 ChatOpenAI + httpx.Auth：base_url 拼 `/openai/deployments/{dep}/chat/completions`、`default_query={api-version}`、UA=curl、`max_retries=1`；带 tools 节点强制 `reasoning_effort=none`、绝不传 minimal、只用 `max_completion_tokens`；provider≠ericai raise NotImplementedError
+  - secret 只从 `AZURE_CLIENT_SECRET_FILE` 读（去空白），值不入配置/日志；token 进程内缓存、120s 提前刷、双重检查锁
+  - 工具包装已确认 service 签名；locate.rank_context / match.match / schools.get_school_major / schools.get_school+get_school_strength / major_catalog.get_major_detail / (内联 db.fetch_all + match.build_req_indexes/lookup_reqs) / match.sensitivity；每个写 ledger 返 `{eid, data}`
+  - `requirements.txt` 补 `azure-identity>=1.19`；`.venv` 装 langchain-core 1.6.3 / langchain-openai 1.6.2 / azure-identity 1.25.3
+- Files created:
+  - `webapp/backend/app/agent/{__init__,config,llm,evidence,contracts}.py`、`app/agent/tools/__init__.py`
+  - `webapp/backend/tests/agent/{test_evidence,test_llm_factory,test_tools}.py`
+
+## Test Results（Phase 1 第一批）
+| Test | 范围 | Expected | Actual | Status |
+|------|------|----------|--------|--------|
+| test_evidence.py | eid 自增/get/render/截断 | 全过 | 7 passed | ✅ |
+| test_llm_factory.py | base_url 拼接/node 映射/minimal 拒/provider raise/token 缓存/Bearer 注入 | 全过 | 8 passed | ✅ |
+| test_tools.py | 7 工具参映射/入参校验/截断/证据写入 | 全过 | 12 passed | ✅ |
+| pytest tests/agent/ | Agent 子集 | 全过 | 27 passed（2.23s） | ✅ |
+| pytest tests/ | 全量回归 | 无回退（基线 67） | 94 passed（2.52s） | ✅ |
+
+> 注：`.venv` 未装 `pytest-asyncio`，且现有套件统一用 `asyncio.run(...)`；因此工厂测试的异步用例也改用 `asyncio.run`（不引入新插件依赖）。
+
+### Phase 1 第二批：LangGraph 主图 + 子图 A/C
+- **Status:** 代码完成、本地单测全过；**未提交**（等用户过目——1A 分批停）
+- Actions taken：
+  - `graphs/advisor.py` 主图：guard→load_context→route_intent→{find_options子图A / explain_unit子图C / refuse / clarify}→synthesize→verify→{deliver / repair→verify / fallback→deliver}；synthesize/repair 包降级捕获（ModelEmptyError→model_failed→fallback）
+  - `graphs/find_options.py`（子图A）/ `graphs/explain.py`（子图C）确定性取证：直接调 service、写 ledger，不走模型工具循环（避开网关 tools+reasoning 不稳）；位次缺失置 clarify 短路 END
+  - `graphs/common.py` 集中 synthesize/repair/verify/deliver/fallback；`_verify_route`（repairs<1）；`_normalize_answer`（AdvisorAnswer.model_validate→model_dump）
+  - `state.py` 新增 `model_failed` channel（LangGraph 拒绝返回未声明为 channel 的 key，必须先在 TypedDict 声明）
+  - `requirements.txt` 补 `langgraph>=1.2`（本地实装 1.2.11）
+- Files created/modified：
+  - `webapp/backend/app/agent/graphs/{advisor,common,find_options,explain}.py`、`app/agent/{state,guards}.py`、`app/agent/prompts/`
+  - `webapp/backend/tests/agent/test_graph_fake_model.py`（新增 9 个）
+
+## Test Results（Phase 1 第二批）
+| Test | 范围 | Expected | Actual | Status |
+|------|------|----------|--------|--------|
+| guard 拦截 | 注入/越界类别 → clarify 短路，model 不被调 | model.calls==0 | 两例均过 | ✅ |
+| find_options 位次门禁 | 无 rank/score → clarify | answer is None | 过 | ✅ |
+| find_options 正常链路 | 取证→synthesize→verify→deliver | 带 DISCLAIMER | 过 | ✅ |
+| explain_unit 链路 | page_context unit →交付 | 带 DISCLAIMER | 过 | ✅ |
+| 修复回环 | bad（缺引用）→verify→repair→good | repairs==1 | 过 | ✅ |
+| 修复后仍失败 | 两版缺引用 → fallback | caveat 含「降级」 | 过 | ✅ |
+| synthesize 空答 | "" → ModelEmptyError → fallback | 降级列证据 | 过 | ✅ |
+| route_intent 解析失败 | 非 JSON → need_clarify | clarify 非空 | 过 | ✅ |
+| pytest tests/agent/ | Agent 子集 | 全过（基线 27） | 36 passed | ✅ |
+| pytest tests/ | 全量回归 | 无回退（基线 94） | 103 passed | ✅ |
