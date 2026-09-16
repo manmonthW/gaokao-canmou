@@ -37,6 +37,37 @@
   endpoint 是前缀；带 tools 只能 `reasoning_effort=none`；5.6 不支持 `minimal`；空答当错误。
 - PPT 项目：`create_chat_model()` 已支持 ericai / DeepSeek 两种 provider（可替换的先例）。
 
+## Phase 0.3：模型接入技术验证（2026-09-16，在 EWS 容器内实测）
+验证方式：本地写一次性探针脚本（不入业务代码、不入库）→ rsync 到 EWS /tmp → 用
+`gaokao-ln-backend` 镜像跑一次性 `docker run --rm`（secret 只读 bind-mount、Azure 参数 inline，
+**不碰运行中的 backend/db**）→ 验证完本地与 EWS 两份探针均删除。
+
+**二选一已定：ChatOpenAI + httpx.Auth（非 AzureChatOpenAI）**——直接复用 PPT 项目已上线的接法。
+base_url 拼到 `.../openai/deployments/{dep}/chat/completions`，`default_query={api-version}`，
+token 由 `httpx.Auth.async_auth_flow` 注入 `Authorization: Bearer`。**实测确认网关容忍这种
+路径形状**（无双拼接 404）。scope = `https://cognitiveservices.azure.com/.default`。
+
+EWS 上的连接参数（从 `docker inspect nir-report-api` 确认，与设计文档一致）：
+- endpoint `https://dev.eu.aigw.ericsson.net/v1/generativeai-model/azure/text`
+- api_version `2024-12-01-preview`；tenant `92e84ceb-...`；client_id `1441db31-...`
+- secret 挂载 `/var/lib/nir-report-secrets/azure-client-secret → /run/secrets/azure-client-secret`（0400/UID 10001）
+
+六项能力探针结果（deployment=se-gpt-5.6-sol，reasoning_effort=none）：
+| 能力 | 结果 | 延迟 |
+|---|---|---|
+| 普通对话 plain_chat | ✅ | 1.54s |
+| JSON 结构化 json_mode（City schema） | ✅ 解析 `{city:沈阳, province:辽宁省}` | 1.22s |
+| tools + reasoning_none（单工具 get_rank） | ✅ 命中 get_rank | 1.99s |
+| 多工具并行 multi_tool | ✅ **num_calls=2**，一次响应同时返回 get_rank+get_batch | 1.54s |
+| 并发 10 请求 concurrency_10 | ✅ 全部成功，wall 2.24s、p50 1.94s、**无 429** | — |
+| sol/luna/terra 选型 shortlist | ✅ 三个部署均可调 | 见下 |
+
+sol/luna/terra 同一问题对比（用三句话解释平行/顺序志愿区别）：
+- **luna**：2.48s / 138 tok——最省 token、最快
+- **terra**：2.43s / 171 tok
+- **sol**：2.95s / 162 tok——输出最完整
+选型候选：默认 sol（与 nir-report / 设计文档一致，输出最充实）；若后续对延迟/成本敏感可切 luna。
+
 ## Technical Decisions
 | Decision | Rationale |
 |----------|-----------|
@@ -49,6 +80,8 @@
 | 方案体检以后端 `plan_analysis.py` 为在线权威 | Agent 与工作台必须共用确定性规则；前端旧实现暂留作断网降级，后续稳定后可删除 |
 | 生产配置 fail closed | `APP_ENV=production` 时拒绝 `CORS=*` 和弱 JWT，避免部署遗漏静默上线 |
 | Phase 0 只预留 nginx Agent 限流 | Agent 接口尚未创建；Phase 1 还需按登录用户做任务/Token 级限流与全局预算 |
+| 模型接入用 ChatOpenAI + httpx.Auth（非 AzureChatOpenAI） | 复用 PPT 已上线接法；实测网关容忍 base_url 拼到 /chat/completions，六项能力全通 |
+| Phase 1 默认 deployment=se-gpt-5.6-sol | 与 nir-report/设计文档一致，输出最完整；luna 最省 token/最快，延迟敏感时可切 |
 
 ## Issues Encountered
 | Issue | Resolution |

@@ -83,3 +83,26 @@
   - 应用层登录限流：`/api/v1/auth/login` 正确 body 前 10 次 401、第 11 起 429（10/60s）✅；
   - `category_unsupported`：`category=艺术类` 返回限制提示 + `error_code`；`普通类` 正常返回候选✅；
   - `/api/v1/plan/analyze`：空方案 `ok:false`；6 志愿均衡方案 `ok:true`、counts 精确✅。
+
+## Session: 2026-09-16
+
+### Phase 0.3：模型接入技术验证
+- **Status:** 已在 EWS 容器内验证通过（六项能力全过）；探针为一次性，验证完本地/EWS 两份均删除
+- Actions taken：
+  - `webapp/backend/requirements.txt` 新增 `langchain-core>=1`、`langchain-openai>=1`、`httpx>=0.27`（Phase 1 必需的前置）
+  - 本地写一次性探针 `probe_ericai_langchain.py`（不入业务代码、不入库，secret 只从挂载文件读、值不打印）
+  - 在 EWS `docker compose build --no-cache backend` 重建镜像（含 langchain），`up -d --no-deps backend`（db 未动，Up 5 weeks healthy）
+  - 用 `gaokao-ln-backend` 镜像跑一次性 `docker run --rm --network gaokao-ln_default`：secret 只读 bind-mount、Azure 参数 inline，不碰运行中的 backend/db
+  - 二选一结论：ChatOpenAI + httpx.Auth（复用 PPT 已上线接法）；实测网关容忍 base_url 拼到 /chat/completions
+
+## Test Results（Phase 0.3）
+| Test | Deployment | Expected | Actual | Status |
+|------|-----------|----------|--------|--------|
+| 普通对话 plain_chat | sol | 非空回答 | ok，1.54s | ✅ |
+| JSON 结构化 json_mode | sol | City schema 可解析 | `{city:沈阳, province:辽宁省}`，1.22s | ✅ |
+| tools + reasoning_none | sol | 命中工具 | get_rank，1.99s | ✅ |
+| 多工具并行 multi_tool | sol | 一次响应多 tool_calls | num_calls=2（get_rank+get_batch），1.54s | ✅ |
+| 并发 10 请求 concurrency_10 | sol | 无 429 | 全过，wall 2.24s、p50 1.94s、无 429 | ✅ |
+| 选型 sol | sol | 可调 | 2.95s / 162 tok，输出最完整 | ✅ |
+| 选型 luna | luna | 可调 | 2.48s / 138 tok，最省/最快 | ✅ |
+| 选型 terra | terra | 可调 | 2.43s / 171 tok | ✅ |

@@ -9,8 +9,8 @@
 「AI 参谋助手」：邀请制内测、模型可替换（为国内已备案模型留路）、所有结论可溯源。
 
 ## Current Phase
-Phase 0.2 — 其余前置修复：**已提交（230765f）、已部署 EWS、复测全部通过**
-下一步：进入 Phase 0.3 模型接入技术验证
+Phase 0.3 — 模型接入技术验证：**已在 EWS 容器内验证通过（六项能力全过，探针已删）**
+下一步：进入 Phase 1 MVP（选校问答 + 单条解读）
 
 ## 已确认的决策（2026-09-15，用户）
 | 决策 | 结论 |
@@ -49,11 +49,11 @@ Phase 0.2 — 其余前置修复：**已提交（230765f）、已部署 EWS、�
 - **Status:** 已提交（230765f）、已部署 EWS、复测全部通过（health / 限流 429 / category_unsupported / plan/analyze）
 
 ### Phase 0.3：模型接入技术验证（§5、§16 阶段 0）
-- [ ] 模型工厂：provider 可配置（ericai / openai 兼容的国内模型），业务只拿 BaseChatModel
-- [ ] 在 EWS backend 容器内验证：普通对话、json_mode 结构化输出、tools + reasoning none、多工具调用、并发 10 请求延迟、429
-- [ ] AzureChatOpenAI vs ChatOpenAI+httpx.Auth 二选一（核实 URL 拼接与请求体字段）
-- [ ] sol / luna / terra 选型
-- **Status:** pending
+- [ ] 模型工厂：provider 可配置（ericai / openai 兼容的国内模型），业务只拿 BaseChatModel（归 Phase 1，本阶段只验证接法）
+- [x] 在 EWS backend 容器内验证：普通对话、json_mode 结构化输出、tools + reasoning none、多工具调用（num_calls=2）、并发 10 请求（无 429）
+- [x] AzureChatOpenAI vs ChatOpenAI+httpx.Auth 二选一 → **定 ChatOpenAI+httpx.Auth**（实测网关容忍 base_url 拼到 /chat/completions）
+- [x] sol / luna / terra 选型：三个部署均可调；luna 最省 token/最快，sol 输出最完整（Phase 1 默认 sol）
+- **Status:** 已完成（2026-09-16，在 EWS 容器内实测六项全过；探针本地/EWS 两份均删；详见 findings.md / progress.md）
 
 ### Phase 1：MVP——选校问答 + 单条解读（§16 阶段 1）
 - **Status:** pending
