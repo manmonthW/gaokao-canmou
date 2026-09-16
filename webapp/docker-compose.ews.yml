@@ -49,6 +49,7 @@ services:
         condition: service_healthy
     volumes:
       - backend_user_data:/app/data
+      - /var/lib/nir-report-secrets/azure-client-secret:/run/secrets/azure-client-secret:ro
       - ../2026allmaterial:/home/ekewang/projects/gaokao/ln/2026allmaterial:ro
       - ./backend/static:/app/static:ro
     healthcheck:
