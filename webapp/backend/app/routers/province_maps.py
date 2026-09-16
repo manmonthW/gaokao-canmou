@@ -3,8 +3,9 @@ import re
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import FileResponse
 
-MAP_ROOT = os.path.abspath(
-    os.path.join(os.path.dirname(__file__), "../../../..", "2026allmaterial", "全国31省市本科高校分布图")
+MAP_ROOT = os.environ.get(
+    "PROVINCE_MAP_ROOT",
+    "/home/ekewang/projects/gaokao/ln/2026allmaterial/全国31省市本科高校分布图",
 )
 _SUFFIX_RE = re.compile(r"省|市|壮族自治区|回族自治区|维吾尔自治区|自治区")
 
