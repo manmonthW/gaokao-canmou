@@ -1,5 +1,6 @@
 import asyncio
 from decimal import Decimal
+from datetime import datetime, timedelta, timezone
 
 from app.agent import jobs
 
@@ -102,3 +103,23 @@ def test_timeout_is_terminal(monkeypatch, tmp_path):
     result = asyncio.run(jobs.get(job["id"], 1))
     assert result["status"] == "timeout"
     assert result["error_code"] == "timeout"
+
+
+def test_get_and_admission_expire_orphaned_jobs(monkeypatch, tmp_path):
+    _configure(monkeypatch, tmp_path)
+    job = jobs._create(1, {"mode": "问答", "message": "test"})
+    stale = (datetime.now(timezone.utc) - timedelta(seconds=40)).strftime("%Y-%m-%d %H:%M:%S.%f")
+    with jobs._connect() as conn:
+        conn.execute("UPDATE agent_jobs SET created_at=? WHERE id=?", (stale, job["id"]))
+
+    result = asyncio.run(jobs.get(job["id"], 1))
+    assert result["status"] == "timeout"
+    assert result["error_code"] == "timeout"
+    assert result["events"][-1]["type"] == "timeout"
+
+    replacement = jobs._create(2, {"mode": "问答", "message": "test"})
+    with jobs._connect() as conn:
+        conn.execute("UPDATE agent_jobs SET created_at=? WHERE id=?", (stale, replacement["id"]))
+    decision, active = asyncio.run(jobs.admission(2))
+    assert decision == "ok"
+    assert active is None

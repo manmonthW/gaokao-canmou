@@ -137,6 +137,26 @@ def _row(row: sqlite3.Row | None) -> dict[str, Any] | None:
 
 def _find_active(user_id: int):
     with _connect() as conn:
+        # In-process tasks can disappear without a process restart. Fence stale rows so
+        # they cannot be reused forever or block all future requests for the user.
+        stale_before = f"-{config.AGENT_JOB_TIMEOUT_SECONDS + 30} seconds"
+        stale = conn.execute(
+            """SELECT id FROM agent_jobs
+               WHERE user_id=? AND status IN ('pending','running')
+               AND COALESCE(started_at, created_at) < datetime('now', ?)""",
+            (user_id, stale_before),
+        ).fetchall()
+        now = _now()
+        for row in stale:
+            conn.execute(
+                """UPDATE agent_jobs SET status='timeout', error_code='timeout',
+                   error_message='分析超时，请重新提问', finished_at=? WHERE id=?""",
+                (now, row["id"]),
+            )
+            conn.execute(
+                "INSERT INTO agent_events(job_id,type,message,created_at) VALUES (?,?,?,?)",
+                (row["id"], "timeout", "分析超时", now),
+            )
         return _row(conn.execute(
             "SELECT * FROM agent_jobs WHERE user_id=? AND status IN ('pending','running') ORDER BY created_at LIMIT 1",
             (user_id,),
@@ -303,6 +323,26 @@ def _get(job_id: str, user_id: int, after: int):
         ).fetchone()
         if not job:
             return None
+        if job["status"] in ("pending", "running"):
+            base_time = job["started_at"] or job["created_at"]
+            stale = conn.execute(
+                "SELECT ? < datetime('now', ?)",
+                (base_time, f"-{config.AGENT_JOB_TIMEOUT_SECONDS + 30} seconds"),
+            ).fetchone()[0]
+            if stale:
+                now = _now()
+                conn.execute(
+                    """UPDATE agent_jobs SET status='timeout', error_code='timeout',
+                       error_message='分析超时，请重新提问', finished_at=? WHERE id=?""",
+                    (now, job_id),
+                )
+                conn.execute(
+                    "INSERT INTO agent_events(job_id,type,message,created_at) VALUES (?,?,?,?)",
+                    (job_id, "timeout", "分析超时", now),
+                )
+                job = conn.execute(
+                    "SELECT * FROM agent_jobs WHERE id=? AND user_id=?", (job_id, user_id)
+                ).fetchone()
         events = [dict(row) for row in conn.execute(
             "SELECT seq,type,message,created_at FROM agent_events WHERE job_id=? AND seq>? ORDER BY seq",
             (job_id, after),

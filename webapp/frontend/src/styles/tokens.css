@@ -83,6 +83,29 @@
     monospace;
 }
 
+:root[data-theme='dark'] {
+  --color-primary: #6ea8ff;
+  --color-primary-hover: #8bb8ff;
+  --color-primary-soft: #162b4d;
+  --color-text: #edf4fc;
+  --color-text-secondary: #c0ccda;
+  --color-text-muted: #91a1b5;
+  --color-bg: #0d1520;
+  --color-bg-subtle: #172231;
+  --color-surface: #121d2a;
+  --color-border: #2a394a;
+  --color-border-strong: #3a4b5e;
+  --color-reach-soft: #392c16;
+  --color-match-soft: #12352a;
+  --color-safe-soft: #162b4d;
+  --color-volatile-soft: #292343;
+  --color-insufficient-soft: #27313d;
+  --color-doc-accent-soft: rgba(255, 113, 104, 0.14);
+  --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.28);
+  --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.32);
+  --shadow-lg: 0 12px 30px rgba(0, 0, 0, 0.38);
+}
+
 /* 等宽数字：分数、位次、位次差统一对齐 */
 .tnum {
   font-variant-numeric: tabular-nums;

@@ -16,6 +16,7 @@ body {
   font-size: var(--text-base);
   line-height: 1.6;
   -webkit-font-smoothing: antialiased;
+  transition: color 0.2s ease, background-color 0.2s ease;
 }
 
 h1,
@@ -36,6 +37,23 @@ a {
   --el-color-primary: var(--color-primary);
   --el-border-radius-base: var(--radius-md);
   --el-font-family: var(--font-sans);
+}
+
+:root[data-theme='dark'] {
+  --el-bg-color: var(--color-surface);
+  --el-bg-color-page: var(--color-bg);
+  --el-bg-color-overlay: var(--color-surface);
+  --el-text-color-primary: var(--color-text);
+  --el-text-color-regular: var(--color-text-secondary);
+  --el-text-color-secondary: var(--color-text-muted);
+  --el-border-color: var(--color-border);
+  --el-border-color-light: var(--color-border);
+  --el-border-color-lighter: var(--color-border);
+  --el-fill-color: var(--color-bg-subtle);
+  --el-fill-color-light: var(--color-bg-subtle);
+  --el-fill-color-lighter: var(--color-bg-subtle);
+  --el-fill-color-blank: var(--color-surface);
+  --el-mask-color: rgba(0, 0, 0, 0.72);
 }
 
 /* 风险分类徽章（冲/稳/保/高波动/数据不足）—— 全站共享的唯一正确写法。

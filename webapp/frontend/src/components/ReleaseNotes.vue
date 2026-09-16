@@ -12,6 +12,8 @@ function show() {
   localStorage.setItem(RELEASE_STORAGE_KEY, CURRENT_VERSION)
 }
 
+defineExpose({ show })
+
 onMounted(() => {
   unread.value = localStorage.getItem(RELEASE_STORAGE_KEY) !== CURRENT_VERSION
 })

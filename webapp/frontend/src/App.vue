@@ -5,6 +5,7 @@ import { ElMessage } from 'element-plus'
 import { useJourney } from '@/composables/useJourney'
 import { useAuth } from '@/composables/useAuth'
 import ReleaseNotes from '@/components/ReleaseNotes.vue'
+import UtilityMenu from '@/components/UtilityMenu.vue'
 import { useIsMobile } from '@/composables/useBreakpoint'
 
 const AdvisorDrawer = defineAsyncComponent(() => import('@/components/advisor/AdvisorDrawer.vue'))
@@ -15,6 +16,7 @@ const journey = useJourney()
 const auth = useAuth()
 const isMobile = useIsMobile()
 const advisorOpen = ref(false)
+const releaseNotes = ref<InstanceType<typeof ReleaseNotes> | null>(null)
 
 function openAdvisor() {
   if (!auth.isLoggedIn.value) {
@@ -32,6 +34,10 @@ function onLogout() {
   auth.logout()
   ElMessage.success('已退出登录，可继续匿名使用（本机数据已清空）')
   router.push('/')
+}
+
+function showReleaseNotes() {
+  releaseNotes.value?.show()
 }
 
 // 决策主线三步（有序、带状态）
@@ -140,34 +146,15 @@ const chromeless = computed(() => route.meta.public === true)
           </RouterLink>
         </nav>
 
-        <!-- 账号状态 -->
+        <!-- 高频 AI 入口和统一工具设置 -->
         <el-button v-if="auth.isLoggedIn.value" class="advisor-entry" size="small" type="primary" @click="openAdvisor">问参谋</el-button>
-        <div class="acct">
-          <template v-if="auth.isLoggedIn.value">
-            <el-dropdown trigger="click">
-              <span class="acct__user">
-                <span class="acct__avatar">{{ (auth.user.value?.username || '?').slice(0, 1).toUpperCase() }}</span>
-                <span class="acct__name">{{ auth.user.value?.username }}</span>
-              </span>
-              <template #dropdown>
-                <el-dropdown-menu>
-                  <el-dropdown-item disabled>{{ auth.user.value?.email }}</el-dropdown-item>
-                  <el-dropdown-item divided @click="onLogout">退出登录</el-dropdown-item>
-                </el-dropdown-menu>
-              </template>
-            </el-dropdown>
-          </template>
-          <el-tooltip v-else content="不登录也能用：数据只存本机浏览器；登录后可跨设备同步" placement="bottom">
-            <el-button size="small" type="primary" plain @click="goAuth">登录 / 注册</el-button>
-          </el-tooltip>
-        </div>
-      </div>
-
-      <!-- 次级工具栏：版本更新单独占一行，避免顶部资料库过宽时被挤压或换行异常 -->
-      <div class="utility-bar">
-        <div class="utility-bar__inner">
-          <ReleaseNotes />
-        </div>
+        <UtilityMenu
+          :logged-in="auth.isLoggedIn.value"
+          :user="auth.user.value"
+          @login="goAuth"
+          @logout="onLogout"
+          @releases="showReleaseNotes"
+        />
       </div>
 
       <!-- 决策主线：步骤条，视觉主导，带序号 / 连接线 / 实时状态 -->
@@ -199,6 +186,7 @@ const chromeless = computed(() => route.meta.public === true)
       <RouterView />
     </main>
     <AdvisorDrawer v-if="advisorOpen" v-model="advisorOpen" />
+    <ReleaseNotes ref="releaseNotes" class="release-notes-host" />
     <footer class="app-footer">
       <span>数据仅供参考，最终报考资格与录取规则以辽宁省招考部门及院校官方信息为准。</span>
       <span class="app-footer__sep" aria-hidden="true">·</span>
@@ -217,7 +205,7 @@ const chromeless = computed(() => route.meta.public === true)
   position: sticky;
   top: 0;
   z-index: 10;
-  background: rgba(255, 255, 255, 0.9);
+  background: color-mix(in srgb, var(--color-surface) 90%, transparent);
   backdrop-filter: saturate(180%) blur(8px);
   border-bottom: 1px solid var(--color-border);
 }
@@ -306,26 +294,14 @@ const chromeless = computed(() => route.meta.public === true)
   box-shadow: var(--shadow-sm);
 }
 
-/* ---- 账号状态 ---- */
-.acct { display: flex; align-items: center; }
+/* ---- 右上工具 ---- */
 .advisor-entry { flex: 0 0 auto; }
-.acct__user { display: flex; align-items: center; gap: var(--space-2); cursor: pointer; outline: none; }
-.acct__user:focus-visible { outline: 2px solid var(--color-primary); outline-offset: 2px; }
-.acct__avatar {
-  width: 28px; height: 28px; border-radius: 50%;
-  background: var(--color-primary); color: #fff;
-  display: grid; place-items: center; font-size: var(--text-sm); font-weight: 700;
-}
-.acct__name { font-size: var(--text-sm); color: var(--color-text); }
-
-/* ---- 次级工具栏 ---- */
-.utility-bar { border-top: 1px solid var(--color-border); background: var(--color-surface); }
-.utility-bar__inner { max-width: 1080px; margin: 0 auto; padding: var(--space-2) var(--space-4); display: flex; justify-content: flex-end; }
+.release-notes-host { display: none; }
 
 /* ---- 决策主线步骤条 ---- */
 .stepper {
   border-top: 1px solid var(--color-border);
-  background: linear-gradient(180deg, rgba(238, 244, 255, 0.5), rgba(255, 255, 255, 0));
+  background: linear-gradient(180deg, color-mix(in srgb, var(--color-primary-soft) 50%, transparent), transparent);
 }
 .stepper__inner {
   max-width: 1080px;
@@ -443,6 +419,5 @@ const chromeless = computed(() => route.meta.public === true)
 /* 触控输入设备（不只是窄屏），按 adapt.md 建议用 pointer:coarse 检测加大热区 */
 @media (max-width: 640px), (pointer: coarse) {
   .lib-btn { min-height: 44px; }
-  .acct__user { min-height: 44px; padding: 4px; }
 }
 </style>

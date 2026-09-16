@@ -4,6 +4,7 @@ import type { AdvisorEvent, AdvisorHistoryTurn, AdvisorJob } from '@/types'
 
 const STORAGE_KEY = 'ln-zhiyuan-advisor'
 const TERMINAL = new Set(['ready', 'failed', 'timeout', 'cancelled'])
+const CLIENT_TIMEOUT_MS = 90_000
 
 function loadHistory(): AdvisorHistoryTurn[] {
   try {
@@ -19,6 +20,7 @@ const job = ref<AdvisorJob | null>(null)
 const events = ref<AdvisorEvent[]>([])
 const error = ref<string | null>(null)
 let pollTimer: ReturnType<typeof setTimeout> | null = null
+let pollStartedAt = 0
 
 function saveHistory() {
   history.value = history.value.slice(-20)
@@ -31,6 +33,16 @@ function stopPolling() {
 }
 
 async function poll(jobId: string) {
+  if (pollStartedAt && Date.now() - pollStartedAt > CLIENT_TIMEOUT_MS) {
+    stopPolling()
+    error.value = '分析等待时间过长，请取消后重新提问'
+    try {
+      await api.cancelAdvisorJob(jobId)
+    } catch {
+      // The backend may already have moved the job to a terminal state.
+    }
+    return
+  }
   try {
     const latest = await api.advisorJob(jobId, events.value.at(-1)?.seq || 0)
     if (latest.events.length) events.value.push(...latest.events)
@@ -70,6 +82,7 @@ async function submit(message: string, mode = '问答', profile: Record<string, 
     history.value.push({ role: 'user', content: question })
     saveHistory()
     job.value = { job_id: created.job_id, status: created.status as AdvisorJob['status'], events: [] }
+    pollStartedAt = Date.now()
     await poll(created.job_id)
   } catch (reason) {
     error.value = reason instanceof Error ? reason.message : '参谋服务暂时不可用'
