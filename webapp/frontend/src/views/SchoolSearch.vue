@@ -3,6 +3,7 @@ import { ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { api } from '@/api/client'
 import SchoolDrawer from '@/components/SchoolDrawer.vue'
+import Cities from '@/views/Cities.vue'
 import type { HotSchool, HotSchoolCategory } from '@/types'
 
 const router = useRouter()
@@ -11,6 +12,7 @@ const results = ref<any[]>([])
 const loading = ref(false)
 const error = ref<string | null>(null)
 const searched = ref(false)
+const browseMode = ref<'search' | 'region'>('search')
 
 // 院校详情抽屉（复用 SchoolDrawer，右侧滑出，与专业查询体验一致）
 const detailCode = ref<string | null>(null)
@@ -99,22 +101,46 @@ onMounted(() => {
   <div class="page">
     <div class="lib-eyebrow"><span class="lib-eyebrow__dot"></span>资料库 · 查询工具</div>
     <h1 class="page__title">院校查询</h1>
-    <p class="page__sub">按院校名称或代码搜索，查看院校画像、城市与历年招生专业。随时查询，不影响你的定位与方案。</p>
+    <p class="page__sub">已知学校可直接搜索；尚未确定学校时，可按省份和城市逐步浏览。</p>
 
-    <el-input
-      v-model="q"
-      placeholder="输入院校名称或代码，如：大连理工"
-      aria-label="输入院校名称或代码"
-      clearable
-      class="search"
-      @keyup.enter="onSearch"
-    >
-      <template #append>
-        <el-button :loading="loading" @click="onSearch">搜索</el-button>
-      </template>
-    </el-input>
+    <div class="browse-mode" role="tablist" aria-label="院校查询方式">
+      <button
+        type="button"
+        role="tab"
+        :aria-selected="browseMode === 'search'"
+        :class="['browse-mode__item', { 'browse-mode__item--active': browseMode === 'search' }]"
+        @click="browseMode = 'search'"
+      >
+        <span class="browse-mode__icon" aria-hidden="true">⌕</span>
+        <span><strong>搜索院校</strong><small>知道院校名称或代码</small></span>
+      </button>
+      <button
+        type="button"
+        role="tab"
+        :aria-selected="browseMode === 'region'"
+        :class="['browse-mode__item', { 'browse-mode__item--active': browseMode === 'region' }]"
+        @click="browseMode = 'region'"
+      >
+        <span class="browse-mode__icon" aria-hidden="true">⌖</span>
+        <span><strong>按地域浏览</strong><small>先选省份，再看城市与院校</small></span>
+      </button>
+    </div>
 
-    <el-alert v-if="error" type="error" :title="error" show-icon :closable="false" class="card" />
+    <template v-if="browseMode === 'search'">
+      <el-input
+        v-model="q"
+        placeholder="输入院校名称或代码，如：大连理工"
+        aria-label="输入院校名称或代码"
+        clearable
+        class="search"
+        @keyup.enter="onSearch"
+      >
+        <template #append>
+          <el-button :loading="loading" @click="onSearch">搜索</el-button>
+        </template>
+      </el-input>
+
+      <el-alert v-if="error" type="error" :title="error" show-icon :closable="false" class="card" />
 
     <div v-if="searched && !loading && !results.length" class="empty">
       未找到匹配的院校，请尝试更短的关键词。
@@ -213,6 +239,9 @@ onMounted(() => {
         </el-card>
       </div>
     </section>
+    </template>
+
+    <Cities v-else embedded />
 
     <!-- 详情抽屉（右侧滑出，与专业查询一致） -->
     <el-drawer
@@ -319,6 +348,15 @@ onMounted(() => {
 .lib-eyebrow__dot { width: 6px; height: 6px; border-radius: 50%; background: var(--color-text-muted); }
 .page__title { font-size: var(--text-2xl); }
 .page__sub { color: var(--color-text-secondary); margin: var(--space-2) 0 var(--space-4); }
+.browse-mode { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); max-width: 720px; gap: var(--space-3); margin-bottom: var(--space-5); }
+.browse-mode__item { display: flex; align-items: center; gap: var(--space-3); min-height: 68px; padding: var(--space-3) var(--space-4); border: 1px solid var(--color-border); border-radius: var(--radius-lg); background: var(--color-surface); color: var(--color-text); cursor: pointer; text-align: left; transition: border-color 0.15s, background 0.15s, box-shadow 0.15s; }
+.browse-mode__item:hover { border-color: var(--color-primary); }
+.browse-mode__item:focus-visible { outline: 2px solid var(--color-primary); outline-offset: 2px; }
+.browse-mode__item--active { border-color: var(--color-primary); background: var(--color-primary-soft); box-shadow: var(--shadow-sm); }
+.browse-mode__icon { width: 34px; height: 34px; flex: 0 0 34px; display: grid; place-items: center; border-radius: var(--radius-md); color: var(--color-primary); background: var(--color-surface); font-size: var(--text-xl); }
+.browse-mode__item > span:last-child { display: flex; flex-direction: column; gap: 3px; }
+.browse-mode__item strong { font-size: var(--text-sm); }
+.browse-mode__item small { color: var(--color-text-muted); line-height: 1.4; }
 .search { max-width: 560px; margin-bottom: var(--space-4); }
 .card { margin-bottom: var(--space-4); border-radius: var(--radius-lg); box-shadow: var(--shadow-sm); }
 .empty { padding: var(--space-8); text-align: center; color: var(--color-text-muted); }
@@ -373,6 +411,9 @@ onMounted(() => {
 .hot-detail__link { margin-top: var(--space-2); }
 .rank-tbl { margin-top: var(--space-1); }
 .dim { color: var(--color-text-muted); }
+@media (max-width: 640px) {
+  .browse-mode { grid-template-columns: 1fr; }
+}
 </style>
 
 <!-- 圈层标签悬浮说明的全局样式（popper 渲染在 body 下，需非 scoped） -->

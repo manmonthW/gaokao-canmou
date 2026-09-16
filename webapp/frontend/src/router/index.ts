@@ -10,6 +10,7 @@ import Guides from '@/views/Guides.vue'
 import Match from '@/views/Match.vue'
 import Workbench from '@/views/Workbench.vue'
 import Auth from '@/views/Auth.vue'
+import Cities from '@/views/Cities.vue'
 
 const routes = [
   { path: '/', name: 'locate', component: Locate },
@@ -23,6 +24,7 @@ const routes = [
   { path: '/workbench', name: 'workbench', component: Workbench },
   { path: '/datacenter', name: 'datacenter', component: DataCenter },
   { path: '/eligibility', name: 'eligibility', component: Eligibility },
+  { path: '/cities', name: 'cities', component: Cities },
 ]
 
 const router = createRouter({

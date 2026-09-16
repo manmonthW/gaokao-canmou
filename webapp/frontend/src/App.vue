@@ -4,6 +4,7 @@ import { RouterView, RouterLink, useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { useJourney } from '@/composables/useJourney'
 import { useAuth } from '@/composables/useAuth'
+import ReleaseNotes from '@/components/ReleaseNotes.vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -147,6 +148,13 @@ const chromeless = computed(() => route.meta.public === true)
         </div>
       </div>
 
+      <!-- 次级工具栏：版本更新单独占一行，避免顶部资料库过宽时被挤压或换行异常 -->
+      <div class="utility-bar">
+        <div class="utility-bar__inner">
+          <ReleaseNotes />
+        </div>
+      </div>
+
       <!-- 决策主线：步骤条，视觉主导，带序号 / 连接线 / 实时状态 -->
       <div class="stepper">
         <div class="stepper__inner">
@@ -176,7 +184,9 @@ const chromeless = computed(() => route.meta.public === true)
       <RouterView />
     </main>
     <footer class="app-footer">
-      数据仅供参考，最终报考资格与录取规则以辽宁省招考部门及院校官方信息为准。
+      <span>数据仅供参考，最终报考资格与录取规则以辽宁省招考部门及院校官方信息为准。</span>
+      <span class="app-footer__sep" aria-hidden="true">·</span>
+      <a href="mailto:14324569@qq.com?subject=辽宁志愿参谋内容反馈">内容反馈：14324569@qq.com</a>
     </footer>
   </div>
 </template>
@@ -291,6 +301,10 @@ const chromeless = computed(() => route.meta.public === true)
 }
 .acct__name { font-size: var(--text-sm); color: var(--color-text); }
 
+/* ---- 次级工具栏 ---- */
+.utility-bar { border-top: 1px solid var(--color-border); background: var(--color-surface); }
+.utility-bar__inner { max-width: 1080px; margin: 0 auto; padding: var(--space-2) var(--space-4); display: flex; justify-content: flex-end; }
+
 /* ---- 决策主线步骤条 ---- */
 .stepper {
   border-top: 1px solid var(--color-border);
@@ -392,7 +406,14 @@ const chromeless = computed(() => route.meta.public === true)
   text-align: center;
   color: var(--color-text-muted);
   font-size: var(--text-xs);
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-2);
 }
+.app-footer a { color: var(--color-primary); text-decoration: none; }
+.app-footer a:hover { text-decoration: underline; }
 
 @media (max-width: 640px) {
   .brand__tag {

@@ -351,6 +351,24 @@ export interface CityProfile {
   note: string | null
 }
 
+export interface CityListItem extends CityProfile {
+  school_count: number
+}
+
+export interface CityDetail {
+  profile: CityProfile
+  schools: {
+    code: string
+    name: string
+    level: string | null
+    nature: string | null
+    type: string | null
+    is_985: boolean | null
+    is_211: boolean | null
+    is_dfc: boolean | null
+  }[]
+}
+
 export interface YearlySummary {
   year: number
   category: string

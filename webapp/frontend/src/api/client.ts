@@ -85,6 +85,8 @@ import type {
   HotSchool,
   DataStatusMatrix,
   PlanAnalysis,
+  CityListItem,
+  CityDetail,
 } from '@/types'
 
 export const api = {
@@ -118,6 +120,12 @@ export const api = {
     getJson<MajorDetail>(`/major-catalog/detail${buildQuery({ name })}`),
   hotImageUrl: (name: string) =>
     `${ORIGIN}${PREFIX}/major-catalog/hot-image${buildQuery({ name })}`,
+  // ---- 城市透视 ----
+  cityProvinces: () => getJson<string[]>('/cities/provinces'),
+  cities: (p: Record<string, unknown>) => getJson<CityListItem[]>(`/cities${buildQuery(p)}`),
+  cityDetail: (city: string) => getJson<CityDetail>(`/cities/${encodeURIComponent(city)}`),
+  provinceMapImageUrl: (province: string) =>
+    `${ORIGIN}${PREFIX}/province-maps/${encodeURIComponent(province)}/image`,
   school: (code: string) => getJson<SchoolDetail>(`/schools/${code}`),
   // 院校学科实力聚合（任务 #9）：未知院校后端返回 404
   schoolStrength: (code: string) => getJson<SchoolStrength>(`/schools/${code}/strength`),
