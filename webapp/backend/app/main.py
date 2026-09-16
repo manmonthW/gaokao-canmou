@@ -3,14 +3,17 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.routers import data_status, meta, locate, search, schools, datacenter, match, plan, auth, major_catalog, hot_schools, feedback, guides, cities, province_maps
+from app.routers.agent import router as agent_router
 from app.config import CORS_ORIGINS
 from app import db, user_db
+from app.agent import jobs as agent_jobs
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     db.init_pool()
     user_db.init_db()
+    agent_jobs.init_db()
     yield
     db.close_pool()
 
@@ -36,6 +39,7 @@ app.include_router(datacenter.router, prefix=API_PREFIX)
 app.include_router(match.router, prefix=API_PREFIX)
 app.include_router(plan.router, prefix=API_PREFIX)
 app.include_router(auth.router, prefix=API_PREFIX)
+app.include_router(agent_router, prefix=API_PREFIX)
 app.include_router(major_catalog.router, prefix=API_PREFIX)
 app.include_router(hot_schools.router, prefix=API_PREFIX)
 app.include_router(feedback.router, prefix=API_PREFIX)

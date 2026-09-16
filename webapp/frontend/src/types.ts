@@ -721,6 +721,70 @@ export interface MatchCandidate {
   major_trend?: MajorTrend | null
 }
 
+// ------------------------------ 邀请制志愿参谋 ------------------------------
+
+export type AdvisorJobStatus = 'pending' | 'running' | 'ready' | 'failed' | 'timeout' | 'cancelled'
+
+export interface AdvisorSection {
+  title: string
+  body: string
+  evidence_ids: string[]
+}
+
+export interface AdvisorRecommendedUnit {
+  school: string
+  major: string
+  batch?: string | null
+  rank_last?: number | null
+  risk?: string | null
+  evidence_ids: string[]
+}
+
+export interface AdvisorAnswer {
+  summary: string
+  sections: AdvisorSection[]
+  recommended_units: AdvisorRecommendedUnit[]
+  caveats: string[]
+  follow_ups: string[]
+  needs_clarification: boolean
+  disclaimer?: string
+}
+
+export interface AdvisorEvidence {
+  eid: string
+  tool: string
+  args: Record<string, unknown>
+  data: unknown
+  ts?: number
+}
+
+export interface AdvisorEvent {
+  seq: number
+  type: string
+  message: string
+  created_at: string
+}
+
+export interface AdvisorJob {
+  job_id: string
+  status: AdvisorJobStatus
+  events: AdvisorEvent[]
+  result?: {
+    answer?: AdvisorAnswer | null
+    clarify?: string | null
+    evidence?: AdvisorEvidence[]
+  } | null
+  error_code?: string | null
+  error_message?: string | null
+  created_at?: string
+  updated_at?: string
+}
+
+export interface AdvisorHistoryTurn {
+  role: 'user' | 'assistant'
+  content: string
+}
+
 export interface MatchFacetItem {
   value: string
   count: number

@@ -15,6 +15,7 @@ import Cities from '@/views/Cities.vue'
 const routes = [
   { path: '/', name: 'locate', component: Locate },
   { path: '/auth', name: 'auth', component: Auth, meta: { public: true } },
+  { path: '/advisor', name: 'advisor', component: () => import('@/views/Advisor.vue'), meta: { public: true } },
   { path: '/guides', name: 'guides', component: Guides },
   { path: '/search/school', name: 'school-search', component: SchoolSearch },
   { path: '/search/major', name: 'major-search', component: MajorSearch },

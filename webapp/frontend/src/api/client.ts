@@ -87,6 +87,8 @@ import type {
   PlanAnalysis,
   CityListItem,
   CityDetail,
+  AdvisorJob,
+  AdvisorHistoryTurn,
 } from '@/types'
 
 export const api = {
@@ -182,6 +184,20 @@ export const api = {
   getUserData: () => getJson<{ data: Record<string, unknown> }>('/user/data'),
   putUserData: (data: Record<string, unknown>) =>
     sendJson<{ ok: boolean }>('PUT', '/user/data', { data }),
+  // ---- 邀请制志愿参谋 ----
+  createAdvisorJob: (payload: {
+    message: string
+    mode?: string
+    profile?: Record<string, unknown>
+    page_context?: Record<string, unknown>
+    history?: AdvisorHistoryTurn[]
+  }) => sendJson<{ job_id: string; status: string; reused: boolean }>('POST', '/agent/jobs', payload),
+  advisorJob: (jobId: string, after = 0) =>
+    getJson<AdvisorJob>(`/agent/jobs/${encodeURIComponent(jobId)}${buildQuery({ after })}`),
+  cancelAdvisorJob: (jobId: string) =>
+    sendJson<{ job_id: string; status: string }>('POST', `/agent/jobs/${encodeURIComponent(jobId)}/cancel`, {}),
+  advisorFeedback: (jobId: string, helpful: boolean, reason?: string) =>
+    sendJson<{ ok: boolean }>('POST', `/agent/jobs/${encodeURIComponent(jobId)}/feedback`, { helpful, reason }),
   // ---- P4 录取结果自愿回填（匿名可用） ----
   submitFeedback: (payload: Record<string, unknown>) =>
     sendJson<{ ok?: boolean; id?: number; error?: string }>('POST', '/feedback', payload),

@@ -94,6 +94,26 @@ sol/luna/terra 同一问题对比（用三句话解释平行/顺序志愿区别�
 
 验证：`pytest tests/agent/ -q` 36 passed（基线 27）；`pytest tests/ -q` 103 passed（基线 94，无回退）。
 
+## Phase 1 第三批：接口 + 任务存储（2026-09-16）
+实现要点：
+- **任务状态持久化而非内存表**：`agent.db` 存 job/event/trace/feedback，轮询可跨 worker；进程重启后未完成任务明确终止为 `failed(restart)`，不伪装继续执行。
+- **最小后台执行模型**：POST 先落库再 `asyncio.create_task`；每 worker 信号量 4，60 秒硬超时。同用户已有 pending/running 时返回原任务，避免重复花费。
+- **邀请制 fail closed**：必须同时满足 `AGENT_ENABLED=true`、已登录、用户 ID/邮箱/用户名命中 `AGENT_ALLOWLIST`；空白名单不开放任何用户。
+- **所有权隔离**：轮询、取消、反馈全部带 `user_id` 查询，不允许通过 job_id 读取他人结果；持久错误只存安全分类与用户可见文案，不写原始异常。
+- **取消语义**：pending 立即 cancelled；running 设置 `cancel_requested`，当前 LangGraph 调用结束后丢弃结果并标记 cancelled。当前版本不支持节点中途强杀或重启续跑，符合只读 MVP，但部署前需要在 UX 中说明。
+
+验证：`pytest tests/agent/ -q` 47 passed（基线 36）；`pytest tests/ -q` 114 passed（基线 103，无回退）；OpenAPI 与 ASGITransport 请求均确认四条 Agent 路由可达。FastAPI 0.141 在 `app.routes` 中以 `_IncludedRouter` 保存 include 分支，不能再用旧版“逐项找 APIRoute”的方式判定是否装配。
+
+## Phase 1 第四批：前端 + 评测资产（2026-09-16）
+实现与决策：
+- **上下文入口而非孤立聊天框**：顶栏支持自由问答；匹配行直接携带该单元的代码、档位、`risk_reason` 和历年位次，避免模型猜用户指的是哪一行。
+- **一个状态层，两种交付形态**：桌面为右侧抽屉，手机为 `/advisor` 全屏页，二者复用 `useAdvisor` 和 `AdvisorPanel`；Agent 组件动态导入，独立 JS 约 4.63KB gzip。
+- **结构化安全渲染**：回答、推荐单元和证据全部逐字段渲染；证据编号展开显示确定性工具返回，不使用 `v-html`。聊天摘要仅保留在 `ln-zhiyuan-advisor`，最多 20 轮，不加入账号云同步。
+- **前端不复制白名单**：登录后显示入口，但真正授权仍由后端 `AGENT_ENABLED + allowlist` 决定；未邀请用户收到明确 403，避免白名单规则在两个端漂移。
+- **评测资产先可离线验收**：55 条用 JSON-compatible YAML 保存，标准库即可检查，不为测试向生产 requirements 增加 PyYAML。真实模型评分仍必须在 EricAI 环境执行后才能宣称达到上线门槛。
+
+验证：后端 `115 passed`；前端 build 通过；选校 30 + 解读 15 + 越界/攻击 10 共 55 条，ID 唯一且断言结构完整。真实模型质量门槛与 EWS HTTPS E2E 尚未执行。
+
 ## Technical Decisions
 | Decision | Rationale |
 |----------|-----------|
@@ -112,6 +132,8 @@ sol/luna/terra 同一问题对比（用三句话解释平行/顺序志愿区别�
 | Phase 1 默认 deployment=se-gpt-5.6-sol | 与 nir-report/设计文档一致，输出最完整；luna 最省 token/最快，延迟敏感时可切 |
 | 子图 A/C 确定性取证而非模型工具循环（决策 3A） | 网关对 tools+reasoning 不稳；直接调 service 取证可控可溯，把模型变量限在 route_intent 分类与 synthesize 写解读两处 |
 | 主图而非单个大节点 | 确定性编排便于逐段降级与单测；synthesize/repair 包降级捕获（model_failed channel）使空答/拦截可路由到 fallback，不抛到调用端 |
+| Agent 任务先用 SQLite + 进程内执行 | 单机邀请制 MVP 的最小可靠闭环；状态和轮询持久化，重启明确失败，不使用会跨 worker 丢失的内存任务表；容量增长后再换外部队列 |
+| 空 allowlist 默认拒绝全部用户 | 邀请制必须 fail closed，避免只开 `AGENT_ENABLED` 就误向所有登录用户开放 |
 
 ## Issues Encountered
 | Issue | Resolution |

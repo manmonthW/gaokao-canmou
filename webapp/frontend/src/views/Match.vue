@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, defineAsyncComponent, onMounted } from 'vue'
+import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { api } from '@/api/client'
 import { useProfile, EXAMINEE_YEAR } from '@/composables/useProfile'
@@ -16,12 +17,41 @@ import TrendBadge from '@/components/TrendBadge.vue'
 import TrendDetail from '@/components/TrendDetail.vue'
 import ThresholdCurve from '@/components/ThresholdCurve.vue'
 
+const AdvisorDrawer = defineAsyncComponent(() => import('@/components/advisor/AdvisorDrawer.vue'))
+
 const { profile } = useProfile()
 const planner = usePlanner()
 // 移动端结果表收窄：层次/省份/位次细项列不渲染（不是靠 CSS 隐藏——el-table 的
 // <colgroup> 固定列宽，隐藏单元格不会真正收窄表格），改到展开行里查看，
 // 信息不丢失，只是收进「渐进展示」，符合 adapt.md「不要隐藏核心功能」
 const isMobile = useIsMobile()
+const router = useRouter()
+const advisorOpen = ref(false)
+const advisorQuestion = ref('')
+const advisorContext = ref<Record<string, unknown>>({})
+
+function explainCandidate(row: MatchCandidate) {
+  advisorQuestion.value = `为什么${row.school_name}的${row.major_name || '这个专业'}被分到“${row.risk}”档？`
+  advisorContext.value = {
+    unit: {
+      school_code: row.school_code,
+      school_name: row.school_name,
+      major_code: row.major_code,
+      major_name: row.major_name,
+      batch: row.batch,
+      risk: row.risk,
+      risk_reason: row.risk_reason,
+      last_year_rank: row.last_year_rank,
+      yearly: row.yearly,
+    },
+  }
+  if (isMobile.value) {
+    sessionStorage.setItem('ln-zhiyuan-advisor-context', JSON.stringify(advisorContext.value))
+    router.push({ path: '/advisor', query: { mode: '解读', q: advisorQuestion.value } })
+  } else {
+    advisorOpen.value = true
+  }
+}
 
 const meta = ref<any>(null)
 const data = ref<MatchResponse | null>(null)
@@ -854,8 +884,9 @@ onMounted(async () => {
               <span v-if="row.warning" class="risk-tag risk-tag--insufficient">数据不足</span>
             </template>
           </el-table-column>
-          <el-table-column label="操作" width="170" align="center" fixed="right">
+          <el-table-column label="操作" width="230" align="center" fixed="right">
             <template #default="{ row }">
+              <el-button link size="small" type="primary" @click="explainCandidate(row)">为什么这档</el-button>
               <el-button size="small" type="success" @click="onAddToPlan(row)">+方案</el-button>
               <el-button link size="small" :type="planner.isFavorite(candidateId(row)) ? 'warning' : 'default'" @click="onFav(row)">
                 {{ planner.isFavorite(candidateId(row)) ? '★' : '☆' }}
@@ -881,6 +912,15 @@ onMounted(async () => {
         </p>
       </el-card>
     </template>
+
+    <!-- 加入方案弹窗 -->
+    <AdvisorDrawer
+      v-if="advisorOpen"
+      v-model="advisorOpen"
+      mode="解读"
+      :initial-question="advisorQuestion"
+      :page-context="advisorContext"
+    />
 
     <!-- 加入方案弹窗 -->
     <el-dialog v-model="planPicker.visible" title="加入志愿方案" width="420px">

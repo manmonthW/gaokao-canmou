@@ -31,6 +31,16 @@ services:
       JWT_SECRET: ${JWT_SECRET:?Set a strong JWT_SECRET}
       JWT_EXPIRE_HOURS: "168"
       USER_DB_PATH: /app/data/users.db
+      AGENT_DB_PATH: /app/data/agent.db
+      AGENT_ENABLED: ${AGENT_ENABLED:-false}
+      AGENT_ALLOWLIST: ${AGENT_ALLOWLIST:-}
+      AGENT_DAILY_TOKEN_BUDGET: ${AGENT_DAILY_TOKEN_BUDGET:-200000}
+      AZURE_OPENAI_ENDPOINT: ${AZURE_OPENAI_ENDPOINT:-}
+      AZURE_OPENAI_DEPLOYMENT: ${AZURE_OPENAI_DEPLOYMENT:-se-gpt-5.6-sol}
+      AZURE_OPENAI_API_VERSION: ${AZURE_OPENAI_API_VERSION:-2024-12-01-preview}
+      AZURE_TENANT_ID: ${AZURE_TENANT_ID:-}
+      AZURE_CLIENT_ID: ${AZURE_CLIENT_ID:-}
+      AZURE_CLIENT_SECRET_FILE: /run/secrets/azure-client-secret
       HOT_IMAGE_ROOT: /home/ekewang/projects/gaokao/ln/2026allmaterial/热门大学介绍
       GUIDE_PDF_ROOT: /home/ekewang/projects/gaokao/ln/2026allmaterial
       GUIDE_HTML_DIR: /app/static/guides

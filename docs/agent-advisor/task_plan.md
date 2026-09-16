@@ -9,8 +9,8 @@
 「AI 参谋助手」：邀请制内测、模型可替换（为国内已备案模型留路）、所有结论可溯源。
 
 ## Current Phase
-Phase 1 MVP — 第二批（LangGraph 主图 + 子图 A/C）：**代码完成、单测全过（本地）；未提交**
-下一步：等用户过目后进入第三批（接口 + 任务存储）
+Phase 1 MVP — 第四批（前端 + 评测资产）：**代码完成、本地验证通过；未提交**
+下一步：配置邀请名单与 EricAI secret 后跑真实模型评测并部署 EWS 灰度
 
 ## 已确认的决策（2026-09-15，用户）
 | 决策 | 结论 |
@@ -81,11 +81,25 @@ Phase 1 MVP — 第二批（LangGraph 主图 + 子图 A/C）：**代码完成、
 - [x] 验证：`pytest tests/agent/ -q` 36 passed（基线 27）；`pytest tests/ -q` 103 passed（基线 94，无回退）
 - **Status:** 代码完成、本地验证通过；**未提交**（等用户过目——1A 分批停）
 
-#### 第三批（待起）：接口 + 任务存储
-- [ ] jobs.py + agent.db 建表 / routers/agent.py
+#### 第三批：接口 + 任务存储
+- [x] `jobs.py` + 独立 `agent.db`：jobs/events/traces/feedback 表；WAL；启动时将残留 pending/running 标为 failed(restart)；按保留期清理
+- [x] `routers/agent.py`：创建 202、按事件序号轮询、软取消、反馈四个接口；Pydantic 限制消息 500 字/历史 6 轮
+- [x] Gate 0：`AGENT_ENABLED` + 登录 + allowlist（用户 ID/邮箱/用户名），空白名单 fail closed
+- [x] 控制面：同用户单进行中任务复用、30 次/小时、每日 token 预算、每 worker 并发 4、任务 60 秒超时、所有权隔离、用户可见错误脱敏
+- [x] 生命周期与部署配置：启动建库/恢复残留任务；`.env.example`、EWS compose 补 Agent 参数与 secret 文件路径
+- [x] 测试：新增 `test_jobs.py` 5 个、`test_agent_api.py` 6 个（含真实 ASGI 路由可达性）；Agent 47 passed，全量 114 passed（基线 103，无回退）
+- **Status:** 代码完成、本地验证通过；**未提交**（等用户过目——1A 分批停）
 
-#### 第四批（待起）：前端 + 评测
-- [ ] 前端抽屉/advisor 页 / 评测集
+#### 第四批：前端 + 评测
+- [x] 懒加载桌面 `AdvisorDrawer` + 手机全屏 `/advisor`，共享 `AdvisorPanel`；顶栏登录用户入口与匹配结果“为什么这档”入口
+- [x] `useAdvisor.ts`：提交、每秒增量轮询、取消、反馈、本机最多 20 轮历史；退出长期云同步范围
+- [x] 安全结构化渲染：结论、分段解释、证据编号展开、推荐单元、注意事项、固定免责声明；不使用 `v-html`
+- [x] 匹配解读携带当前单元事实；桌面直接传 page_context，手机用 sessionStorage 跨路由传递
+- [x] Phase 1 评测资产 55 条：选校 30 + 解读 15 + 越界/攻击 10；JSON-compatible YAML，无新增生产依赖；静态完整性测试
+- [x] 本地验证：后端 115 passed；前端 build 通过；Agent 懒加载 JS 约 4.63KB gzip（Panel 3.67 + Drawer 0.47 + page 0.49），主包入口增量保持目标范围
+- [ ] 真实 se-gpt-5.6-sol 跑 55 条评测并按 §13.3 出报告（需要 EricAI 凭证/可访问环境）
+- [ ] EWS 白名单部署和 HTTPS 浏览器 E2E（需要部署凭证、allowlist、Azure secret 文件）
+- **Status:** 前端与离线评测资产完成；真实模型评测和部署待环境，**未提交**
 
 ### Phase 2：方案体检 Agent（§16 阶段 2）
 - **Status:** pending
@@ -102,3 +116,6 @@ Phase 1 MVP — 第二批（LangGraph 主图 + 子图 A/C）：**代码完成、
 | 本机 `docker compose` 不支持 compose 子命令，`docker-compose` v1 又不支持顶层 `name` | 1–2 | 用 YAML 解析和镜像级检查覆盖本地语法/运行验证；EWS 的 Compose v2 部署时再跑 `config` |
 | nginx:alpine 拉取 Docker Hub 超时 | 1 | 属外网镜像拉取问题；改用本机已有 nginx/项目镜像或在 EWS 构建时执行 `nginx -t` |
 | backend 首次镜像构建 120s 超时 | 1 | pip 首次下载依赖尚未完成；延长构建超时后重试，复用 Docker 层缓存 |
+| 第三批首次静态检查发现 `main.py` 路由缩进错误 | 1 | 修正缩进后用 `py_compile` 重跑 |
+| 系统 `python3` 未安装 Phase 1 的 LangChain/LangGraph 依赖 | 1 | 按 Phase 1 既有约定改用 `backend/.venv/bin/python` 执行 Agent 测试 |
+| FastAPI 0.141 的 `app.routes` 使用 `_IncludedRouter`，旧式直接枚举误判为路径未装配 | 1–3 | OpenAPI 显示四条路径；新增 ASGITransport 请求测试确认 `/api/v1/agent/jobs` 可达并返回预期 401 |

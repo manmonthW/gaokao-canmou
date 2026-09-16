@@ -155,3 +155,40 @@
 | route_intent 解析失败 | 非 JSON → need_clarify | clarify 非空 | 过 | ✅ |
 | pytest tests/agent/ | Agent 子集 | 全过（基线 27） | 36 passed | ✅ |
 | pytest tests/ | 全量回归 | 无回退（基线 94） | 103 passed | ✅ |
+
+### Phase 1 第三批：接口 + 任务存储
+- **Status:** 代码完成、本地单测全过；**未提交**（等用户过目——1A 分批停）
+- Actions taken：
+  - 新增 `agent/jobs.py`：独立 SQLite `agent.db`，持久化任务、增量事件、节点审计表和反馈；WAL；启动时恢复策略为残留 pending/running → failed(restart)；结果 24h、审计 30d 清理；
+  - 新增 `routers/agent.py`：`POST /agent/jobs`、`GET /agent/jobs/{id}?after=N`、取消、反馈；统一登录 + 功能开关 + 邀请白名单；任务按 user_id 隔离；
+  - 控制面：同用户仅一个进行中任务、每小时 30 次、每日全局 token 预算、每 worker 并发 4、60 秒 wall timeout；取消在排队态立即终止、运行态在当前图完成后软取消；
+  - `main.py` 生命周期初始化任务库并装配路由；`.env.example` 与 EWS compose 补任务库、预算、EricAI 非敏感参数和 secret 文件路径。
+
+## Test Results（Phase 1 第三批）
+| Test | 范围 | Expected | Actual | Status |
+|------|------|----------|--------|--------|
+| test_jobs.py | 重启恢复/admission/持久结果与事件/所有权/取消/反馈/超时 | 全过 | 5 passed | ✅ |
+| test_agent_api.py | 开关/白名单/复用任务/新任务/404/契约上限/ASGI 路由可达性 | 全过 | 6 passed | ✅ |
+| pytest tests/agent/ | Agent 子集 | 全过（基线 36） | 47 passed | ✅ |
+| pytest tests/ | 全量回归 | 无回退（基线 103） | 114 passed | ✅ |
+| npm run build | 前端生产构建 | 通过 | 通过；保留既有 1.24MB 主 chunk 警告 | ✅ |
+| compose YAML | Agent 任务库与环境参数 | 可解析 | 关键字段检查通过 | ✅ |
+
+### Phase 1 第四批：前端 + 评测资产
+- **Status:** 代码完成、本地验证通过；真实模型评测/EWS 灰度待凭证；**未提交**。
+- Actions taken：
+  - 新增懒加载 `AdvisorDrawer.vue`、共享 `AdvisorPanel.vue`、结构化 `AnswerView.vue` 与手机全屏 `Advisor.vue`；桌面保持右侧抽屉，≤640px 使用无应用外壳的全屏页；
+  - 新增 `useAdvisor.ts`：202 提交、按事件序号每秒轮询、取消、点赞/点踩、本机 20 轮历史；API 和响应类型集中到现有 `client.ts`/`types.ts`；
+  - 顶栏仅登录后显示“问参谋”；匹配结果每行新增“为什么这档”，将单元代码、院校专业、档位依据和历年位次作为 page_context 传入；
+  - 答案按 JSON 字段渲染，证据编号点击查看工具来源，不使用 `v-html`；失败、超时、追问、进度事件均有独立状态；
+  - 新增 `tests/agent/eval/cases.yaml` 55 条 Phase 1 评测资产及结构完整性测试，不增加 PyYAML 生产依赖。
+
+## Test Results（Phase 1 第四批）
+| Test | 范围 | Expected | Actual | Status |
+|------|------|----------|--------|--------|
+| pytest tests/ | 后端与评测资产全量 | 无回退 | 115 passed | ✅ |
+| npm run build | Vue/TypeScript 生产构建 | 通过 | 通过；Agent 独立 JS chunks 合计约 4.63KB gzip | ✅ |
+| eval asset check | 选校/解读/越界覆盖 | 30/15/10 | 55 cases，分布正确、ID 唯一 | ✅ |
+| git diff --check | 工作区补丁格式 | 无错误 | 通过 | ✅ |
+| 真实 EricAI eval | §13.3 质量门槛 | 达标 | 未运行：本地无生产凭证 | ⏳ |
+| EWS HTTPS E2E | 白名单用户完整问答 | 通过 | 未运行：需部署配置与 secret | ⏳ |

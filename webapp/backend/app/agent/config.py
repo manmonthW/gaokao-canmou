@@ -28,11 +28,25 @@ AZURE_CLIENT_SECRET_FILE = os.environ.get(
 # token scope（Phase 0.3 已验证）
 AZURE_TOKEN_SCOPE = "https://cognitiveservices.azure.com/.default"
 
-# ---- Agent 任务库（与 USER_DB_PATH 同目录；本批仅定常量，下一批建表才用）----
+# ---- Agent 任务库（与 USER_DB_PATH 同目录，任务/事件/审计独立存储）----
 _DEFAULT_AGENT_DB = os.path.join(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data", "agent.db"
 )
 AGENT_DB_PATH = os.environ.get("AGENT_DB_PATH", _DEFAULT_AGENT_DB)
+
+# ---- 邀请制、任务容量与保留策略 ----
+# allowlist 支持用户 ID、邮箱或用户名，逗号分隔；空列表表示无人可用，不能误开放。
+AGENT_ALLOWLIST = {
+    item.strip().lower()
+    for item in os.environ.get("AGENT_ALLOWLIST", "").split(",")
+    if item.strip()
+}
+AGENT_MAX_CONCURRENCY = max(1, int(os.environ.get("AGENT_MAX_CONCURRENCY", "4")))
+AGENT_USER_HOURLY_LIMIT = max(1, int(os.environ.get("AGENT_USER_HOURLY_LIMIT", "30")))
+AGENT_JOB_TIMEOUT_SECONDS = max(5, int(os.environ.get("AGENT_JOB_TIMEOUT_SECONDS", "60")))
+AGENT_DAILY_TOKEN_BUDGET = max(0, int(os.environ.get("AGENT_DAILY_TOKEN_BUDGET", "200000")))
+AGENT_JOB_RETENTION_HOURS = max(1, int(os.environ.get("AGENT_JOB_RETENTION_HOURS", "24")))
+AGENT_TRACE_RETENTION_DAYS = max(1, int(os.environ.get("AGENT_TRACE_RETENTION_DAYS", "30")))
 
 # ---- 生产 fail-closed：只有当生产环境且 Agent 开启时才强校验连接参数 ----
 # （与 app.config 的 JWT/CORS 校验同风格；开发环境不阻塞，仅在真正调用时才需要凭证）

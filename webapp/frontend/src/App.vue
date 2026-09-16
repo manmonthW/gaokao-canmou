@@ -1,15 +1,29 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, defineAsyncComponent, ref } from 'vue'
 import { RouterView, RouterLink, useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { useJourney } from '@/composables/useJourney'
 import { useAuth } from '@/composables/useAuth'
 import ReleaseNotes from '@/components/ReleaseNotes.vue'
+import { useIsMobile } from '@/composables/useBreakpoint'
+
+const AdvisorDrawer = defineAsyncComponent(() => import('@/components/advisor/AdvisorDrawer.vue'))
 
 const route = useRoute()
 const router = useRouter()
 const journey = useJourney()
 const auth = useAuth()
+const isMobile = useIsMobile()
+const advisorOpen = ref(false)
+
+function openAdvisor() {
+  if (!auth.isLoggedIn.value) {
+    goAuth()
+    return
+  }
+  if (isMobile.value) router.push('/advisor')
+  else advisorOpen.value = true
+}
 
 function goAuth() {
   router.push({ path: '/auth', query: { redirect: route.fullPath } })
@@ -127,6 +141,7 @@ const chromeless = computed(() => route.meta.public === true)
         </nav>
 
         <!-- 账号状态 -->
+        <el-button v-if="auth.isLoggedIn.value" class="advisor-entry" size="small" type="primary" @click="openAdvisor">问参谋</el-button>
         <div class="acct">
           <template v-if="auth.isLoggedIn.value">
             <el-dropdown trigger="click">
@@ -183,6 +198,7 @@ const chromeless = computed(() => route.meta.public === true)
     <main class="app-main">
       <RouterView />
     </main>
+    <AdvisorDrawer v-if="advisorOpen" v-model="advisorOpen" />
     <footer class="app-footer">
       <span>数据仅供参考，最终报考资格与录取规则以辽宁省招考部门及院校官方信息为准。</span>
       <span class="app-footer__sep" aria-hidden="true">·</span>
@@ -292,6 +308,7 @@ const chromeless = computed(() => route.meta.public === true)
 
 /* ---- 账号状态 ---- */
 .acct { display: flex; align-items: center; }
+.advisor-entry { flex: 0 0 auto; }
 .acct__user { display: flex; align-items: center; gap: var(--space-2); cursor: pointer; outline: none; }
 .acct__user:focus-visible { outline: 2px solid var(--color-primary); outline-offset: 2px; }
 .acct__avatar {
