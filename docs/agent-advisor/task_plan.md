@@ -9,8 +9,8 @@
 「AI 参谋助手」：邀请制内测、模型可替换（为国内已备案模型留路）、所有结论可溯源。
 
 ## Current Phase
-Phase 1 MVP — 第四批（前端 + 评测资产）：**已部署 EWS，真实模型质量门槛和 HTTPS API E2E 全部通过；待提交**
-下一步：提交并推送本轮稳定性、持久化和验收产物
+Phase 1.1 — Bounded Harness 改造：**进行中**
+下一步：完成任务合同、确定性计划、覆盖验证、部分结果终态和复杂请求回归测试。
 
 ## 已确认的决策（2026-09-15，用户）
 | 决策 | 结论 |
@@ -105,6 +105,16 @@ Phase 1 MVP — 第四批（前端 + 评测资产）：**已部署 EWS，真实�
 ### Phase 2：方案体检 Agent（§16 阶段 2）
 - **Status:** pending
 
+### Phase 1.1：LangGraph Bounded Harness（2026-09-16）
+- [x] 明确架构边界：模型理解语义；程序验证执行约束、展开计划、执行只读工具、检查覆盖和终止
+- [x] 增加 `TaskSpec`、`PlanStep`、`CoverageItem`，将松散 slots 升级为可校验任务合同
+- [x] 多省请求展开为有界检索计划，工具结果逐步记录 done/empty/failed 和 evidence_ids
+- [x] 增加完成度校验，区分“检索为空”“尚未执行”“执行失败”
+- [x] 工具失败时直接交付明确的部分结果，不让生成模型掩盖缺失证据
+- [ ] 扩展到城市/专业/层次等更多可验证维度，并按收益决定是否引入一次有界 replan
+- [ ] 跑 Agent/full pytest、真实模型离线回放和 EWS shadow/canary
+- **Status:** 核心代码已实现，验证进行中；未提交、未部署
+
 ### Phase 3：政策问答（§16 阶段 3）
 - **Status:** pending
 
@@ -121,3 +131,5 @@ Phase 1 MVP — 第四批（前端 + 评测资产）：**已部署 EWS，真实�
 | 系统 `python3` 未安装 Phase 1 的 LangChain/LangGraph 依赖 | 1 | 按 Phase 1 既有约定改用 `backend/.venv/bin/python` 执行 Agent 测试 |
 | FastAPI 0.141 的 `app.routes` 使用 `_IncludedRouter`，旧式直接枚举误判为路径未装配 | 1–3 | OpenAPI 显示四条路径；新增 ASGITransport 请求测试确认 `/api/v1/agent/jobs` 可达并返回预期 401 |
 | Agent 结果证据包含数据库 `Decimal`，SQLite JSON 持久化失败 | 1 | 在任务持久化边界用 FastAPI `jsonable_encoder` 统一转换，并增加 Decimal 回归测试；正式域名 E2E 复测通过 |
+| 系统 pytest 无 `PYTHONPATH`，随后缺少 `langgraph` | 1–2 | 使用项目既有 `webapp/backend/.venv/bin/python -m pytest`，不改系统环境 |
+| 尝试复用本地后端 Docker 镜像，但镜像不存在且 Docker Hub 连接重置 | 1 | 不再重复拉镜像，改用项目 `.venv` |

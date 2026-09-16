@@ -35,6 +35,9 @@ class AgentState(TypedDict, total=False):
     # —— 路由与插槽 ——
     intent: str  # explain_unit / policy_qa / plan_review / find_options / need_clarify / refuse
     slots: dict[str, Any]  # 省份/城市/专业关键词/档位/层次等
+    task_spec: dict[str, Any]  # 经原文/profile 验证的当前任务合同
+    plan: list[dict[str, Any]]  # 确定性只读工具执行计划
+    coverage: list[dict[str, Any]]  # 每个用户要求维度的执行覆盖状态
 
     # —— 工具循环 ——
     messages: Annotated[list[BaseMessage], add_messages]

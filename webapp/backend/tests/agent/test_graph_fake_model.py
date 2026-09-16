@@ -416,7 +416,7 @@ def test_find_options_deliver_uses_evidence_units(monkeypatch):
     ]
 
 
-def test_find_options_does_not_apply_model_generated_filters(monkeypatch):
+def test_find_options_only_applies_filters_verified_from_question(monkeypatch):
     seen = {}
 
     async def fake_match(**kwargs):
@@ -444,7 +444,88 @@ def test_find_options_does_not_apply_model_generated_filters(monkeypatch):
         }
     )
     assert seen["province"] is None
-    assert seen["risk"] is None
+    assert seen["risk"] == "稳"
+
+
+def test_find_options_searches_each_province_named_by_user(monkeypatch):
+    seen = []
+
+    async def fake_match(**kwargs):
+        seen.append(kwargs)
+        province = kwargs["province"]
+        return {
+            "items": [{
+                "school_name": f"{province}某大学",
+                "major_name": "计算机科学与技术",
+                "risk": "稳",
+            }]
+        }
+
+    monkeypatch.setattr(match, "match", fake_match)
+    _install_locate(monkeypatch)
+    answer = json.dumps(
+        {
+            "summary": "已按三省分别筛选。",
+            "sections": [
+                {"title": "辽宁", "body": "已检索辽宁候选。", "evidence_ids": ["E2"]},
+                {"title": "吉林", "body": "已检索吉林候选。", "evidence_ids": ["E3"]},
+                {"title": "黑龙江", "body": "已检索黑龙江候选。", "evidence_ids": ["E4"]},
+            ],
+            "recommended_units": [],
+            "caveats": [],
+            "follow_ups": [],
+            "needs_clarification": False,
+        },
+        ensure_ascii=False,
+    )
+    _install_model(
+        monkeypatch,
+        [_intent_json("find_options", {"province": ["辽宁", "吉林", "黑龙江"]}), answer],
+    )
+    out = _run(
+        {
+            "question": "请按辽宁、吉林、黑龙江分别推荐院校专业",
+            "profile": {"year": 2025, "category": "普通类", "subject": "物理", "batch": "本科批", "rank": 12013},
+        }
+    )
+
+    assert [item["province"] for item in seen] == ["辽宁", "吉林", "黑龙江"]
+    assert [ev.args["province"] for ev in out["ledger"].all() if ev.tool == "search_candidates"] == [
+        "辽宁", "吉林", "黑龙江",
+    ]
+    assert [unit["school"] for unit in out["answer"]["recommended_units"]] == [
+        "辽宁某大学", "吉林某大学", "黑龙江某大学",
+    ]
+    assert out["task_spec"]["provinces"] == ["辽宁", "吉林", "黑龙江"]
+    assert [item["status"] for item in out["coverage"]] == ["covered", "covered", "covered"]
+    assert out["tool_calls"] == 3
+    assert out["tool_rounds"] == 1
+
+
+def test_find_options_failed_scope_returns_explicit_partial_result(monkeypatch):
+    seen = []
+
+    async def fake_match(**kwargs):
+        seen.append(kwargs["province"])
+        if kwargs["province"] == "吉林":
+            raise RuntimeError("temporary database failure")
+        return {"items": [{"school_name": f"{kwargs['province']}某大学", "major_name": "计算机类"}]}
+
+    monkeypatch.setattr(match, "match", fake_match)
+    _install_locate(monkeypatch)
+    model = _install_model(monkeypatch, [_intent_json("find_options", {})])
+    out = _run(
+        {
+            "question": "请按辽宁、吉林分别推荐院校专业",
+            "profile": {"year": 2025, "category": "普通类", "subject": "物理", "batch": "本科批", "rank": 12013},
+        }
+    )
+
+    assert seen == ["辽宁", "吉林"]
+    assert [item["status"] for item in out["coverage"]] == ["covered", "failed"]
+    assert "未完整执行" in out["answer"]["summary"]
+    assert any("吉林" in caveat and "执行失败" in caveat for caveat in out["answer"]["caveats"])
+    assert model.calls == 1
 
 
 # ----------------------------- 8) route_intent 解析失败 -----------------------------

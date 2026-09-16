@@ -8,7 +8,7 @@ PROMPTS_VERSION 变更即视为提示词改动，需重跑评测集并在 findin
 """
 from __future__ import annotations
 
-PROMPTS_VERSION = "2026-09-16.1"
+PROMPTS_VERSION = "2026-09-16.2"
 
 
 # ---- 意图路由（route_intent，带 tools 语义但本节点只做分类，reasoning=none）----
@@ -40,7 +40,7 @@ SYNTHESIZE_SYSTEM = """你是辽宁高考志愿参谋，面向普通类考生和
   • sections[]：每段不超过 300 字，且 evidence_ids 至少 1 个真实存在的证据编号。
   • recommended_units[]：只能是证据里出现过的院校-专业，最多 10 条，每条带 evidence_ids。
   • 若证据里带「未核验/数据不足/未发布/暂无数据/仅供参考」，必须在 caveats 里如实说明。
-  • follow_ups：给 2-3 个用户可能想继续问的问题。
+  • follow_ups：可选。只有确实有助于推进当前问题时才给，最多 2 个；不要用它代替回答，也不要重复用户已经问过的内容。
 禁止任何“一定能录取/保证录取/包录取/录取概率X%/稳录”之类的承诺性说法。
 免责声明由程序追加，你不要自己写。
 

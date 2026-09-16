@@ -29,6 +29,7 @@ from app.agent.graphs.explain import explain_collect_node
 from app.agent.graphs.explain import _parse_unit
 from app.agent.graphs.find_options import find_options_collect_node
 from app.agent.guards import input_guard
+from app.agent.harness import build_plan, build_task_spec, completion_issues
 from app.agent.llm import make_model
 from app.agent.prompts import (
     CLARIFY_GENERIC,
@@ -64,7 +65,7 @@ def load_context_node(state: AgentState) -> dict[str, Any]:
 
     ledger 为运行时对象（不序列化入检查点），各取证节点写入、synthesize/verify 读取。
     """
-    updates: dict[str, Any] = {"repairs": 0}
+    updates: dict[str, Any] = {"repairs": 0, "tool_calls": 0, "tool_rounds": 0}
     if state.get("ledger") is None:
         updates["ledger"] = EvidenceLedger()
     return updates
@@ -111,6 +112,17 @@ async def route_intent_node(state: AgentState) -> dict[str, Any]:
     return {"intent": intent, "slots": merged}
 
 
+def plan_node(state: AgentState) -> dict[str, Any]:
+    """Turn semantic routing into a validated, bounded execution contract."""
+    spec = build_task_spec(state)
+    plan = build_plan(spec)
+    return {
+        "task_spec": spec.model_dump(),
+        "plan": [step.model_dump() for step in plan],
+        "coverage": [],
+    }
+
+
 def _intent_route(state: AgentState) -> str:
     """route_intent 后：本批支持的意图进对应取证子图；其余→ 追问/拒绝（END）。"""
     intent = state.get("intent") or ""
@@ -139,6 +151,8 @@ def _collect_route(state: AgentState) -> str:
     """取证子图后：子图置了 clarify（位次缺失/无法定位）→ END；否则进 synthesize。"""
     if state.get("clarify"):
         return "end"
+    if state.get("intent") == "find_options" and completion_issues(state):
+        return "fallback"
     return "synthesize"
 
 
@@ -178,6 +192,7 @@ def build_advisor_graph():
     g.add_node("guard", guard_node)
     g.add_node("load_context", load_context_node)
     g.add_node("route_intent", route_intent_node)
+    g.add_node("plan", plan_node)
     g.add_node("find_options", find_options_collect_node)
     g.add_node("explain_unit", explain_collect_node)
     g.add_node("refuse", refuse_node)
@@ -197,8 +212,8 @@ def build_advisor_graph():
         "route_intent",
         _intent_route,
         {
-            "find_options": "find_options",
-            "explain_unit": "explain_unit",
+            "find_options": "plan",
+            "explain_unit": "plan",
             "refuse": "refuse",
             "clarify": "clarify",
         },
@@ -206,10 +221,20 @@ def build_advisor_graph():
     g.add_edge("refuse", END)
     g.add_edge("clarify", END)
     g.add_conditional_edges(
-        "find_options", _collect_route, {"end": END, "synthesize": "synthesize"}
+        "plan",
+        _intent_route,
+        {
+            "find_options": "find_options",
+            "explain_unit": "explain_unit",
+            "refuse": "refuse",
+            "clarify": "clarify",
+        },
     )
     g.add_conditional_edges(
-        "explain_unit", _collect_route, {"end": END, "synthesize": "synthesize"}
+        "find_options", _collect_route, {"end": END, "fallback": "fallback", "synthesize": "synthesize"}
+    )
+    g.add_conditional_edges(
+        "explain_unit", _collect_route, {"end": END, "fallback": "fallback", "synthesize": "synthesize"}
     )
     g.add_conditional_edges(
         "synthesize", _synthesize_route, {"fallback": "fallback", "verify": "verify"}

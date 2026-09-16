@@ -12,6 +12,7 @@ from __future__ import annotations
 from typing import Any, Optional
 
 from app.agent.evidence import EvidenceLedger
+from app.agent.harness import PlanStep, coverage_from_plan
 from app.agent.prompts import CLARIFY_NEED_RANK
 from app.agent.tools import build_tools
 
@@ -95,12 +96,33 @@ async def find_options_collect_node(state: dict[str, Any]) -> dict[str, Any]:
         search_args["rank"] = rank
     if score is not None:
         search_args["score"] = score
-    # Optional filters must come from trusted structured context. Route-model
-    # slots are semantic hints and can vary or invent unsupported values.
-    for key in ("province", "city", "level", "major_keyword", "risk"):
+    # Structured profile filters remain authoritative. Province names explicitly
+    # present in the question are also safe to use after deterministic parsing.
+    for key in ("city", "level", "major_keyword", "risk"):
         val = profile.get(key)
         if val:
             search_args[key] = val
 
-    await tools["search_candidates"].ainvoke(search_args)
-    return {"clarify": None}
+    executed: list[PlanStep] = []
+    for raw_step in state.get("plan") or []:
+        step = PlanStep.model_validate(raw_step)
+        try:
+            result = await tools[step.tool].ainvoke({**search_args, **step.args})
+            data = result.get("data") if isinstance(result, dict) else None
+            items = data.get("items") if isinstance(data, dict) else None
+            step.status = "done" if items else "empty"
+            if isinstance(result, dict) and result.get("eid"):
+                step.evidence_ids = [str(result["eid"])]
+        except Exception:  # noqa: BLE001 - failed scope is surfaced by coverage, not hidden
+            step.status = "failed"
+        executed.append(step)
+
+    plan = [step.model_dump() for step in executed]
+    coverage = [item.model_dump() for item in coverage_from_plan(executed)]
+    return {
+        "clarify": None,
+        "plan": plan,
+        "coverage": coverage,
+        "tool_calls": int(state.get("tool_calls") or 0) + len(executed),
+        "tool_rounds": int(state.get("tool_rounds") or 0) + 1,
+    }

@@ -144,6 +144,10 @@ sol/luna/terra 同一问题对比（用三句话解释平行/顺序志愿区别�
 | 空 allowlist 默认拒绝全部用户 | 邀请制必须 fail closed，避免只开 `AGENT_ENABLED` 就误向所有登录用户开放 |
 | 推荐单元从证据账本确定性投影 | 推荐事实不能由生成模型增删；同时满足可溯源和同题稳定性门槛 |
 | 模型生成 slots 不直接下推检索 | 自由文本值可能漂移或不符合 service 枚举；只信任结构化 profile 作为可选筛选来源 |
+| Phase 1.1 采用 bounded workflow 而非自由 ReAct | 招生事实需要确定性和可追溯；吸收 Claude Code harness 的目标保持、计划、工具反馈、完成判断和分层修复，但不给模型任意 SQL/事实/无限循环权限 |
+| `TaskSpec` 同时保存 validated constraints 与 semantic_slots | 原文/profile 可验证约束用于工具执行；模型 slots 保留语义信息供解释/澄清，避免既丢失理解又把幻觉下推数据库 |
+| `empty` 是已完成，`not_run/failed` 是未完成 | “查过但没有结果”可以诚实回答；“根本没查/工具失败”必须作为部分结果或补查，不能由模型措辞掩盖 |
+| Completion verifier 先于生成质量 verifier | 缺证据属于执行层错误，不能靠 repair 重写；只有引用、措辞、结构问题才进入 answer repair |
 
 ## Issues Encountered
 | Issue | Resolution |

@@ -211,3 +211,12 @@
 | `git diff --check` | 无错误 | ✅ |
 | EWS backend health | healthy | ✅ |
 | 正式 HTTPS Agent API | 创建、轮询、结果持久化全链路 ready | ✅ |
+
+### Phase 1.1：Bounded Harness 改造（2026-09-16）
+- 新增 `agent/harness.py`：TaskSpec、PlanStep、CoverageItem、确定性任务解析、计划展开和完成度检查。
+- 主图新增 `plan` 节点：`route_intent → plan → collect → coverage gate → synthesize`。
+- `find_options` 按计划逐项执行并记录 `done/empty/failed`、证据编号、tool_calls 和 tool_rounds。
+- synthesize 输入新增任务合同与覆盖矩阵，使模型围绕用户原始目标组织证据，而不是只看扁平证据列表。
+- 未覆盖/失败不进入文案 repair；直接返回明确部分结果。空结果视为已执行，可正常综合回答。
+- 新增 harness 单测、多省覆盖单测、部分工具失败单测。
+- 环境错误：系统 Python 缺 LangGraph；本地无后端镜像且 Docker Hub 连接失败。按项目记录改用 `backend/.venv` 验证。

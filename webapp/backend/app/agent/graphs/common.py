@@ -18,6 +18,7 @@ from pydantic import ValidationError
 from app.agent.contracts import AdvisorAnswer
 from app.agent.evidence import EvidenceLedger
 from app.agent.guards import append_disclaimer, verify_answer
+from app.agent.harness import completion_issues
 from app.agent.llm import make_model
 from app.agent.prompts import REPAIR_SYSTEM, SYNTHESIZE_SYSTEM
 
@@ -105,9 +106,13 @@ def _synthesize_user_prompt(state: dict[str, Any], ledger: EvidenceLedger) -> st
     """给综合/修复节点的用户消息：原问题 + 证据清单。"""
     question = state.get("question") or ""
     intent = state.get("intent") or ""
+    task_spec = state.get("task_spec") or {}
+    coverage = state.get("coverage") or []
     return (
         f"用户问题：{question}\n"
-        f"意图：{intent}\n\n"
+        f"意图：{intent}\n"
+        f"任务合同：{json.dumps(task_spec, ensure_ascii=False)}\n"
+        f"执行覆盖：{json.dumps(coverage, ensure_ascii=False)}\n\n"
         f"证据（只能用这些内容作答，正文每段标注 evidence_ids）：\n"
         f"{ledger.render_for_prompt()}"
     )
@@ -151,7 +156,8 @@ def verify_node(state: dict[str, Any]) -> dict[str, Any]:
     """§8.2 确定性校验：对 draft 逐条核对证据，产出 issues 列表（空=通过）。"""
     draft = state.get("draft") or {}
     ledger: EvidenceLedger = state["ledger"]
-    issues = verify_answer(draft, ledger)
+    completion = completion_issues(state) if state.get("intent") == "find_options" else []
+    issues = completion + verify_answer(draft, ledger)
     return {"issues": issues}
 
 
@@ -219,16 +225,24 @@ def fallback_node(state: dict[str, Any]) -> dict[str, Any]:
     """
     ledger: EvidenceLedger = state["ledger"]
     units, _ = _units_from_ledger(ledger)
-    summary = (
-        "AI 解读暂不可用，下面只列出检索到的院校-专业与历年位次，供你自行参考。"
-        if units
-        else "AI 解读暂不可用，且这次没有检索到可用的院校-专业数据。"
-    )
+    coverage_issues = completion_issues(state) if state.get("intent") == "find_options" else []
+    if coverage_issues:
+        summary = "本次检索未完整执行，下面只展示已经取得的结果，未完成的范围不作推断。"
+        fallback_caveat = "本次为部分结果：" + "；".join(
+            issue["detail_zh"] for issue in coverage_issues
+        )
+    else:
+        summary = (
+            "AI 解读暂不可用，下面只列出检索到的院校-专业与历年位次，供你自行参考。"
+            if units
+            else "AI 解读暂不可用，且这次没有检索到可用的院校-专业数据。"
+        )
+        fallback_caveat = "本次为降级结果：AI 未能生成解读，以上仅为检索到的原始数据。"
     draft = AdvisorAnswer(
         summary=summary,
         sections=[],
         recommended_units=units,
-        caveats=["本次为降级结果：AI 未能生成解读，以上仅为检索到的原始数据。"],
+        caveats=[fallback_caveat],
         follow_ups=[],
         needs_clarification=False,
     ).model_dump()
