@@ -1,90 +1,66 @@
-# Vercel 迁移进展（更新于 2026-10-21 下午）
+# Vercel 迁移进展（更新于 2026-10-21 16:10）
 
-目标：通过 GitHub 自动把应用部署到 Vercel，数据库也放到 Vercel 上对应的服务（Marketplace 开通的 Neon Postgres，图片和 PDF 放 Vercel Blob）。
+**状态：预览环境已部署并验证通过，等待切换正式版。**
 
-## 已定的决策
+- 预览地址：https://gaokao-canmou-c5byndd07-manmonthws-projects.vercel.app（开着 Vercel 部署保护，需要登录 Vercel 才能访问）
+- 分支：`agent-advisor/phase0`，最新 commit `1da6d0e`，已推送到 GitHub。`main` 还没动。
 
-1. **国内访问**：由用户自己把国内域名指到 Vercel。
-2. **AI 模型**：从 EricAI 换成 DeepSeek，走 OpenAI 兼容接口，`base_url=https://api.deepseek.com`，模型 `deepseek-flash`。API key 由用户提供，只放在环境变量里，不写进代码。
-3. **项目结构**：一个 Vercel 项目，用 Services 方式部署。根目录设为 `webapp`，前端（Vite 静态站）和后端（FastAPI）各是一个服务，`/api/*` 路由给后端。推到 `main` 自动发布正式版，其他分支和 PR 自动生成预览版。
-4. **两种部署并存**：每项改动都有开关，不设就是原来的行为，EWS 部署和现有测试不受影响。
-   - `APP_DB_URL`：设了用 Postgres，没设用 SQLite。
-   - `ASSET_MANIFEST`：设了文件走 Blob 302 跳转，没设读本地 `2026allmaterial/`。
-5. **Neon 上两个角色**（`scripts/neon/roles.sql`）
-   - `gaokao_web_ro`：只读 `public` 下的分析表，会话强制只读，对应 `GAOKAO_DSN`。
-   - `gaokao_app_rw`：只拥有 `app` schema（用户、任务、限流），读不到分析表，对应 `APP_DB_URL`。
-   - 只读角色读不到 `app.users` 里的密码哈希。
+## 数据同步（2026-10-21 15:24 从 EWS 导出）
 
-## 已完成（都还没提交，在分支 `agent-advisor/phase0` 的工作区里）
+| 数据 | 来源 | 目标 | 校验 |
+|---|---|---|---|
+| 分析库，26 张表，116MB | EWS `gaokao-ln-db` 容器的 `pg_dump` | Neon `gaokao-canmou-db`（sin1，PG 18） | 26 张表逐行内容指纹和 EWS 一致（统一用 UTC 比对） |
+| 用户库：6 个用户 + 6 份存档，0 条回填 | EWS 后端容器的 `/app/data/users.db` | Neon `app` schema | 原 id、密码哈希、存档完整；EWS 签发的 token 在 Vercel 上直接有效 |
+| 静态材料：485 个文件，329MB | 本地 `2026allmaterial/`（院校图已裁剪） | Blob `gaokao-canmou-assets`（hkg1，public） | 抽样 10 个文件 sha256 一致；清单已提交为 `backend/asset-manifest.json` |
 
-| 项 | 内容 | 文件 |
-|---|---|---|
-| DeepSeek | 上午完成，见 git diff | `agent/config.py`、`agent/llm.py`、`agent/graphs/common.py` |
-| 可写库支持 PG | 上午完成 | `app/sqlstore.py`、`user_db.py`、`agent/jobs.py` |
-| 1. PG 模式实测 | ✅ 见下方验证 | `tests/test_sqlstore_pg.py` |
-| 2. 连接池 | 两个池的上限都可配（`GAOKAO_DB_POOL_MAX` 默认 12，`APP_DB_POOL_MAX` 默认 3）；池满时排队等待（psycopg2 原本直接抛错）；连接空闲超过 60 秒，取出前先探活，断了就重连（应对 Neon 空闲挂起） | `sqlstore.make_blocking_pool`、`db.py` |
-| 3. vercel.json | `web`（frontend/，SPA 回退到 index.html）+ `api`（backend/，`app.main:app`）；`/api/*` 和 `/health` 走后端 | `webapp/vercel.json` |
-| 4. Blob | 5 个路由在 Blob 模式下改成 302 跳转，文件是否存在、大小都从清单读；院校图上传前先裁剪好，和线上返回的一致；`GUIDE_HTML_DIR` 默认路径改成相对 `backend/` 推算（Vercel 上只有 backend/） | `app/assets.py`、5 个 router、`scripts/blob/` |
-| 5. 限流 | PG 模式下登录/注册限流的计数存进 `app.rate_limit_hits`，多实例共享；SQLite 模式还是内存计数 | `app/rate_limit.py` |
-| 7. Neon 导入 | 导入脚本 + 角色脚本 + 用户迁移脚本 | `scripts/neon/` |
+- 本地备份（`backups/`，已 gitignore，**不进 GitHub**，因为仓库是公开的）：
+  - `gaokao_ews_full_20261021_152404.sql`
+  - `ews_users_20261021_152404.db`（权限 0600）
+  - `ews_rowcounts_20261021_152404.txt`
+- Agent 任务库（`agent.db`，24 条任务）没有迁：任务只保留 24 小时，是临时数据。
 
-### 验证情况
-- ✅ SQLite 模式：149 passed（`.venv/bin/python -m pytest tests -q`），PG 和 Blob 用例在未配置时会跳过。
-- ✅ PG 模式：13 passed（`TEST_APP_DB_URL=... pytest tests/test_sqlstore_pg.py`），用的是本机临时 PG 16，覆盖：
-  - 注册、登录、存档、回填
-  - 任务的生命周期、取消、反馈
-  - 多实例冷启动并发建表
-  - 重新建表不误伤正在跑的任务
-  - 池满时排队
-  - 连接被服务端断开后重连
-  - 跨实例共享限流
-- ✅ PG 模式下用 TestClient 走真实 HTTP 路由（注册 → 重复注册 409 → 登录 → me → 存档 → 回填）。不触发 lifespan，首次访问时会自动建表。
-- ✅ 以 `gaokao_app_rw` 角色、`search_path=app` 再跑一遍 PG 用例，13 passed。ro/rw 的权限隔离逐条确认过。
-- ✅ Blob 模式：`tests/test_assets_blob.py`，外加用全量 485 个文件的清单走 HTTP，16 个 PDF、31 张分布图、12 个组合图都显示可用，跳转正常。本地模式没有回归。
-- ✅ `prepare_assets.py` 对真实材料跑通：485 个文件，328.8 MB，没有缺文件，耗时约 70 秒。
-- ✅ `import.sh` 对临时库跑通（用非超级用户的 owner，模拟 Neon）。
-- ✅ `migrate_users.py` 对 users.db 的副本跑通：6 个用户、19 条回填；保留原 id 和密码哈希；新注册的 id 接着往后排；重复执行会被拒绝。
-- ✅ 前端 `vite build` 通过。
-- ❌ 没有真实部署过：Vercel、Neon、Blob 都还没开通，`vercel.json` 只做了格式检查。
+## Vercel 资源（团队 manmonthws-projects）
 
-## ⚠️ 发现的问题
+- **项目** `gaokao-canmou`（`prj_YMjMiVjtkUAj0Uqc6KblDnbSe7dU`）
+  - 连接 GitHub `manmonthW/gaokao-canmou`，Root Directory 为 `webapp`，正式版分支 `main`，函数区域 hkg1。
+- **Neon** `gaokao-canmou-db`
+  - 两个角色：`gaokao_web_ro`（只读）和 `gaokao_app_rw`（只能访问 `app` schema），权限隔离逐条验证过。
+- **Blob** `gaokao-canmou-assets`。
+- **环境变量**（production 和 preview 都配了）
+  - 敏感类（加密存储）：`GAOKAO_DSN`、`APP_DB_URL`、`JWT_SECRET`（沿用 EWS 的值）、`DEEPSEEK_API_KEY`
+  - 其他：`APP_ENV=production`、`LLM_PROVIDER=deepseek`、`AGENT_ENABLED=true`、`AGENT_ALLOWLIST=ekewang`、`AGENT_JOB_TIMEOUT_SECONDS=120`、`ASSET_MANIFEST`、两个连接池上限 = 3、`CORS_ORIGINS=https://gaokao-canmou.vercel.app`
+  - Neon 和 Blob 集成会自动注入它们自己的变量（`DATABASE_URL`、`BLOB_READ_WRITE_TOKEN` 等），应用不读这些。
+- 本机凭证都在 `~/.config/gaokao-deploy/`（目录 0700，文件 0600），不在仓库里。
 
-1. **备份不完整，不能直接用。** `backups/gaokao_backup_20260811_090348.sql` 导出时，迁移 0014–0017 和对应的 ETL 都还没执行，缺这 7 张表：
-   - `major_admission_summary`、`major_name_map`、`major_eval_map`
-   - `major_strengths`、`school_disciplines`
-   - `major_trend`、`major_trend_alias`
+## 预览环境验证
 
-   也缺 `school_profiles.strength_tags` 列。用它导入，专业字典、学科实力、冷热趋势会显示为空，或走 `schema_missing` 降级。
-   **处理办法**：在当前正式库（EWS 上的 gaokao 库）重新导一份完整备份：`pg_dump -F p --no-owner --no-privileges --clean --if-exists`。本机 5432 上的 PG 没在运行，我这边导不了。
-2. **EWS 的限流可以被绕过（原来就有的问题，这次没改）。** nginx 用的是 `$proxy_add_x_forwarded_for`，它是往后追加，不是覆盖，客户端伪造 XFF 的第一跳就能绕过登录限流。改法：`proxy_set_header X-Forwarded-For $remote_addr;`。Vercel 会覆盖这个头，不受影响。
+- **19 个核心接口的 JSON 和 EWS 线上逐字节一致**，包括：
+  - data-status、meta、搜索、专业字典与详情、热门院校、指南、分布图
+  - 控制线、冷热趋势、选科要求、院校详情与实力
+  - `/match` 智能匹配、`/locate`
+- 5 类文件端点 302 跳转到 Blob，下载正常；指南 HTML 页正常。
+- SPA 路由回退正常（`/match` 返回 index.html）。
+- 登录：密码错误返回 401；用 EWS 签发的 token 能取到用户和全部存档。
+- **Agent（DeepSeek）**：发起问答后**完全不轮询**，等 25 秒再查，任务已经 ready：4 个 section、10 个推荐单元，有证据链。说明响应返回后，后台任务没有被冻结。
+- 冷启动后首次 `/match` 7.6 秒，其他接口 1–2 秒。EWS 是常驻进程，没有这个开销。
 
-## 剩下的工作
+## 部署中修掉的问题（都已提交）
 
-需要用户操作或提供凭证的标 👤。
+1. `vercel.json`：两个服务都要显式写 `framework`（vite / fastapi），否则构建报 `MULTIPLE_FRAMEWORKS_SERVICE`。
+2. 函数包排除了 `.env`、`data/`（本机 SQLite 用户库）、`tests/`、`migrations/`；`maxDuration` 设为 300 秒。
+3. **DeepSeek 结构化输出一直 400**：`deepseek-flash` 默认开思考模式，思考模式不接受强制 `tool_choice`。每次回答都悄悄降级成“AI 解读暂不可用”的模板。已加 `thinking: disabled`，测试也覆盖了。
+4. **后台任务**：通过 `vercel-cache` 拿到运行时的 `wait_until` 钩子，把 Agent 任务挂上去，函数在返回 202 之后会继续跑完。EWS 上这个钩子不存在，代码直接跳过。
+5. `AGENT_JOB_TIMEOUT_SECONDS` 从 60 改为 120（只改了 Vercel 上的配置）。DeepSeek 两次结构化调用约 17 秒，加上冷启动和 SQL 会接近 60 秒的上限。
 
-1. 👤 **重新导出完整的分析库**（见上面问题 1）。
-2. 👤 **开通 Neon**：通过 Vercel Marketplace 开通，区域选新加坡。
-   - 导入：`NEON_OWNER_URL=<直连串> RO_PASSWORD=... RW_PASSWORD=... webapp/scripts/neon/import.sh <完整 dump>`，最后输出的检查表里不能有“缺表”或 0。
-   - 用户迁移：`APP_DB_URL=<rw 的 pooler 串> .venv/bin/python ../scripts/neon/migrate_users.py data/users.db`，建议先加 `--dry-run` 跑一遍。迁的应该是 EWS 容器卷里的 users.db，不是本机这份。
-3. 👤 **开通 Blob 并上传**
-   ```bash
-   cd webapp/backend && .venv/bin/python ../scripts/blob/prepare_assets.py ../../2026allmaterial /tmp/blob-staging
-   cd ../scripts/blob && npm ci && BLOB_READ_WRITE_TOKEN=... node upload.mjs /tmp/blob-staging ../../backend/asset-manifest.json
-   ```
-   然后提交 `backend/asset-manifest.json`，在 Vercel 上设 `ASSET_MANIFEST=asset-manifest.json`。清单里只有公开文件的 URL，没有密钥，可以入库。
-4. 👤 **配置 Vercel**
-   - 导入 GitHub 仓库 `manmonthW/gaokao-canmou`，Root Directory 设为 `webapp`，正式版分支设为 `main`，函数区域设为 `hkg1`。
-   - 正式版和预览版分开配环境变量：
-     - 数据库：`GAOKAO_DSN`（ro，pooler 串，加 `?sslmode=require`）、`APP_DB_URL`（rw，pooler 串）、`GAOKAO_DB_POOL_MAX=3`
-     - 应用：`JWT_SECRET`（沿用 EWS 上的值，已登录用户就不会掉线）、`CORS_ORIGINS`、`APP_ENV=production`、`ASSET_MANIFEST`
-     - Agent：`LLM_PROVIDER=deepseek`、`DEEPSEEK_API_KEY`、`AGENT_ENABLED`、`AGENT_ALLOWLIST`
-   - 打开 Neon 的“每个预览部署建一个数据库分支”功能。
-5. **在预览环境实测**（代码改不了，只能上环境看）
-   - Python 运行时能否识别 `entrypoint: app.main:app`；如果不识别，就在 `backend/pyproject.toml` 加 `[tool.vercel] entrypoint`。
-   - **Agent 后台任务**：`jobs.create` 用 `asyncio.create_task` 在响应返回后继续跑。Vercel Python SDK 没有 `wait_until`，函数在响应发出后可能被挂起。实测方法：发起一次问答后轮询，看状态能不能走到 ready。走不到就要改用 Vercel Queues / Workflow，是比较大的改动。
-   - 函数包大小：`backend/` 下只有代码、`static/guides`（476K）和清单，应该远低于 500MB。
-6. **限流（Vercel Firewall）**：nginx 原来的 `/api/` 10r/s 和 `/api/v1/agent/` 写请求 10r/m，要在 Vercel 控制台 Firewall → Rate Limiting 里配。登录/注册已由应用层用 PG 共享计数兜底。
-7. **正式切换**：确认预览环境没问题后，提交并快进合并到 `main`。EWS 那套先保留，作为回退方案。
+测试：SQLite 模式 150 passed；PG 模式 13 passed。
+
+## 还没做
+
+1. **切换正式版**（需要确认）：把 `agent-advisor/phase0` 快进合并到 `main`，会自动发布 `gaokao-canmou.vercel.app`。
+2. **国内域名**：你自己把域名 CNAME 到 Vercel，然后把域名加进 `CORS_ORIGINS`（目前只有 `*.vercel.app`）。前端和 API 同域时其实不依赖 CORS，但生产配置启动时要求这一项必须明确。
+3. **Firewall 限流**：nginx 原来的 `/api/` 10r/s 和 Agent 写请求 10r/m，要在 Vercel 控制台配置；登录/注册已有应用层兜底。
+4. **EWS 回退方案**：EWS 继续运行。切换之后 EWS 上新产生的用户数据不会同步到 Neon；正式切换前如果有新注册用户，需要用 `migrate_users.py` 再迁一次（目标表非空时脚本会拒绝执行，需要先清空 app 表）。
+5. EWS nginx 的 XFF 追加问题（限流可被绕过），见上一版记录，还没修。
 
 ## 费用提醒
-Vercel 的 Hobby 计划只允许非商业用途。Blob 实际要存 329MB，加上图片和 PDF 的下载流量，Blob 和 Neon 都可能超出免费额度。院校图走 Blob 后不再经过函数，函数调用量会比 EWS 时少。
+Hobby 计划只允许非商业用途。Blob 329MB 加上下载流量、Neon 116MB，都可能超出免费额度。
