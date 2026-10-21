@@ -198,3 +198,31 @@ def test_terminal_state_cannot_be_overwritten(monkeypatch, tmp_path):
     assert jobs._finish(job["id"], "timeout", error_code="timeout") is True
     assert jobs._finish(job["id"], "ready", result={"answer": "late"}) is False
     assert asyncio.run(jobs.get(job["id"], 1))["status"] == "timeout"
+
+
+def test_create_hands_task_to_serverless_wait_until(monkeypatch, tmp_path):
+    """On Vercel the runtime sets a wait_until hook; the job task must be registered with it
+    so the invocation is not frozen after the 202 response."""
+    from vercel.cache.context import set_context
+
+    _configure(monkeypatch, tmp_path)
+
+    class FakeGraph:
+        async def ainvoke(self, state):
+            return {"clarify": "ok", "usage": {}}
+
+    monkeypatch.setattr(jobs, "build_advisor_graph", lambda: FakeGraph())
+    registered = []
+
+    async def scenario():
+        set_context(wait_until=registered.append)
+        try:
+            job = await jobs.create(1, {"mode": "问答", "message": "test"})
+        finally:
+            set_context(wait_until=None)
+        await asyncio.gather(*registered)
+        return job
+
+    job = asyncio.run(scenario())
+    assert len(registered) == 1 and isinstance(registered[0], asyncio.Task)
+    assert asyncio.run(jobs.get(job["id"], 1))["status"] == "ready"

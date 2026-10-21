@@ -262,7 +262,22 @@ async def create(user_id: int, payload: dict[str, Any]) -> dict[str, Any]:
     task = asyncio.create_task(_run(job["id"], payload))
     _tasks[job["id"]] = task
     task.add_done_callback(lambda _task: _tasks.pop(job["id"], None))
+    _keep_invocation_alive(task)
     return job
+
+
+def _keep_invocation_alive(task: asyncio.Task) -> None:
+    """Serverless (Vercel): the function may be frozen once the 202 response is sent, which
+    would stall the job mid-flight. Hand the task to the runtime's wait_until so the
+    invocation stays alive until it finishes (bounded by the function maxDuration).
+    Outside Vercel the hook is absent and this is a no-op."""
+    try:
+        from vercel.cache.context import get_context
+    except ImportError:
+        return
+    hook = get_context().wait_until
+    if hook is not None:
+        hook(task)
 
 
 def _append_event(job_id: str, event_type: str, message: str):
