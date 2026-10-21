@@ -60,6 +60,8 @@ def test_make_model_deepseek_construction(monkeypatch):
     assert m.model_name == agent_cfg.DEEPSEEK_MODEL
     assert m.reasoning_effort is None
     assert m.max_tokens == 2000
+    # 思考模式拒绝强制 tool_choice，必须关掉，否则结构化输出 400
+    assert m.extra_body == {"thinking": {"type": "disabled"}}
     assert llm.structured_output_method() == "function_calling"
 
 

@@ -151,7 +151,12 @@ def make_model(*, node: str) -> BaseChatModel:
 
 
 def _make_deepseek(params: dict) -> BaseChatModel:
-    """DeepSeek OpenAI 兼容接口：用 max_tokens，不传 reasoning_effort（5.6 规则不适用）。"""
+    """DeepSeek OpenAI 兼容接口：用 max_tokens，不传 reasoning_effort（5.6 规则不适用）。
+
+    deepseek-flash 默认开思考模式，而思考模式拒绝强制 tool_choice
+    （"Thinking mode does not support this tool_choice"），with_structured_output 走
+    function_calling 时必然 400。这里统一关闭思考模式。
+    """
     return ChatOpenAI(
         model=agent_cfg.DEEPSEEK_MODEL,
         api_key=agent_cfg.deepseek_api_key(),
@@ -159,6 +164,7 @@ def _make_deepseek(params: dict) -> BaseChatModel:
         max_tokens=params["max_completion_tokens"],
         timeout=params["timeout"],
         max_retries=1,
+        extra_body={"thinking": {"type": "disabled"}},
     )
 
 
