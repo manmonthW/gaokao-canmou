@@ -56,3 +56,4 @@ webapp/docs/EWS_DEPLOY_LESSONS.md
 .qoder/
 vendor/
 graphify-out/
+.vercel/

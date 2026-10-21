@@ -3,13 +3,21 @@
   "services": {
     "web": {
       "root": "frontend/",
+      "framework": "vite",
       "rewrites": [
         { "source": "/(.*)", "destination": "/index.html" }
       ]
     },
     "api": {
       "root": "backend/",
-      "entrypoint": "app.main:app"
+      "framework": "fastapi",
+      "entrypoint": "app.main:app",
+      "functions": {
+        "app/main.py": {
+          "maxDuration": 300,
+          "excludeFiles": "{.env,.env.*,data/**,tests/**,migrations/**,.pytest_cache/**,.venv/**,quality_report.py,run.sh,Dockerfile,.dockerignore}"
+        }
+      }
     }
   },
   "rewrites": [
