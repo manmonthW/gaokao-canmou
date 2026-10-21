@@ -13,6 +13,8 @@ import os
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import FileResponse, HTMLResponse
 
+from app import assets
+
 router = APIRouter(prefix="/guides", tags=["guides"])
 
 # 官方文件根目录（与 hot_schools 图片根目录同一套推导），
@@ -36,12 +38,12 @@ def _item(id, title, filename, summary, points, tag):
 
 # 由 etl/build_guide_html.py 预先生成的排版 HTML（自包含样式）
 # Docker 部署时 static 挂载在 /app/static，可用 GUIDE_HTML_DIR 环境变量覆盖。
+# 相对 backend/ 推导（Vercel 上服务根目录就是 backend/，不能依赖仓库根目录）。
 _HTML_DIR = os.environ.get(
     "GUIDE_HTML_DIR",
     os.path.join(
-        os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(
-            os.path.dirname(os.path.abspath(__file__)))))),
-        "webapp", "backend", "static", "guides",
+        os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
+        "static", "guides",
     ),
 )
 
@@ -196,6 +198,8 @@ _GROUPS = [
 
 
 def _file_size(filename):
+    if assets.USE_BLOB:
+        return assets.size(filename)
     p = os.path.join(_PDF_ROOT, filename)
     try:
         return os.path.getsize(p)
@@ -230,6 +234,8 @@ async def guide_pdf(gid: str):
     for g in _GROUPS:
         for it in g["items"]:
             if it["id"] == gid:
+                if assets.USE_BLOB:
+                    return assets.redirect(it["filename"], missing="该文件尚未放入材料目录")
                 path = os.path.join(_PDF_ROOT, it["filename"])
                 if not os.path.exists(path):
                     raise HTTPException(404, "该文件尚未放入材料目录")

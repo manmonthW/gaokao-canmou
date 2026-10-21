@@ -46,9 +46,21 @@ def test_unknown_node_raises(ericai_env):
 
 
 def test_provider_switch_not_implemented(monkeypatch):
-    monkeypatch.setattr(agent_cfg, "LLM_PROVIDER", "deepseek")
+    monkeypatch.setattr(agent_cfg, "LLM_PROVIDER", "qwen")
     with pytest.raises(NotImplementedError):
         llm.make_model(node="single_read")
+
+
+def test_make_model_deepseek_construction(monkeypatch):
+    monkeypatch.setattr(agent_cfg, "LLM_PROVIDER", "deepseek")
+    monkeypatch.setattr(agent_cfg, "DEEPSEEK_API_KEY_FILE", "")
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "sk-test")
+    m = llm.make_model(node="tool_loop")
+    assert str(m.openai_api_base).rstrip("/") == agent_cfg.DEEPSEEK_BASE_URL
+    assert m.model_name == agent_cfg.DEEPSEEK_MODEL
+    assert m.reasoning_effort is None
+    assert m.max_tokens == 2000
+    assert llm.structured_output_method() == "function_calling"
 
 
 def test_minimal_reasoning_rejected(ericai_env, monkeypatch):

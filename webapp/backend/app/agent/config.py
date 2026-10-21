@@ -10,7 +10,7 @@ import os
 AGENT_ENABLED = os.environ.get("AGENT_ENABLED", "false").strip().lower() in ("1", "true", "yes", "on")
 
 # ---- 模型提供方（§5.2 可替换）----
-# 业务代码只拿 BaseChatModel；本批只实现 ericai，其余（deepseek/qwen）预留分支。
+# 业务代码只拿 BaseChatModel；已实现 ericai 与 deepseek，其余（qwen）预留分支。
 LLM_PROVIDER = os.environ.get("LLM_PROVIDER", "ericai").strip().lower()
 
 # ---- EricAI（Azure OpenAI 兼容网关）连接参数：均从 env（与 Phase 0.3 探针一致）----
@@ -27,6 +27,20 @@ AZURE_CLIENT_SECRET_FILE = os.environ.get(
 
 # token scope（Phase 0.3 已验证）
 AZURE_TOKEN_SCOPE = "https://cognitiveservices.azure.com/.default"
+
+# ---- DeepSeek（OpenAI 兼容接口）：key 优先从文件读，其次 env（Vercel 等平台只能注入 env）----
+DEEPSEEK_BASE_URL = os.environ.get("DEEPSEEK_BASE_URL", "https://api.deepseek.com").strip().rstrip("/")
+DEEPSEEK_MODEL = os.environ.get("DEEPSEEK_MODEL", "deepseek-flash").strip()
+DEEPSEEK_API_KEY_FILE = os.environ.get("DEEPSEEK_API_KEY_FILE", "").strip()
+
+
+def deepseek_api_key() -> str:
+    """读取 DeepSeek key；值不进配置常量/日志。"""
+    if DEEPSEEK_API_KEY_FILE:
+        with open(DEEPSEEK_API_KEY_FILE, "r", encoding="utf-8") as f:
+            return f.read().strip()
+    return os.environ.get("DEEPSEEK_API_KEY", "").strip()
+
 
 # ---- Agent 任务库（与 USER_DB_PATH 同目录，任务/事件/审计独立存储）----
 _DEFAULT_AGENT_DB = os.path.join(
@@ -69,3 +83,10 @@ if IS_PRODUCTION and AGENT_ENABLED and LLM_PROVIDER == "ericai":
             + "、".join(_missing)
             + "。请在部署环境注入（secret 以只读文件挂载，值不写入配置）。"
         )
+
+if IS_PRODUCTION and AGENT_ENABLED and LLM_PROVIDER == "deepseek" and not (
+    DEEPSEEK_API_KEY_FILE or os.environ.get("DEEPSEEK_API_KEY", "").strip()
+):
+    raise RuntimeError(
+        "生产环境已开启 AGENT_ENABLED 且 LLM_PROVIDER=deepseek，但未设置 DEEPSEEK_API_KEY 或 DEEPSEEK_API_KEY_FILE。"
+    )

@@ -3,8 +3,10 @@ import os
 from fastapi import APIRouter, Query
 from fastapi.responses import FileResponse
 from typing import Optional
+from app import assets
 from app.services import major_catalog as svc
 
+_HOT_DIR = "热门专业盘点/clean"
 HOT_ROOT = "/home/ekewang/projects/gaokao/ln/2026allmaterial/热门专业盘点/clean"
 
 router = APIRouter(prefix="/major-catalog", tags=["major-catalog"])
@@ -46,8 +48,11 @@ async def hot_image(name: str = Query(..., description="专业名称")):
     """返回热门专业盘点 PNG 原图（用于图文卡片）。"""
     # 精确匹配：遍历目录找含该专业名的文件
     target = None
-    for f in os.listdir(HOT_ROOT):
+    filenames = assets.list_dir(_HOT_DIR) if assets.USE_BLOB else os.listdir(HOT_ROOT)
+    for f in filenames:
         if f.endswith(".png") and name in f:
+            if assets.USE_BLOB:
+                return assets.redirect(f"{_HOT_DIR}/{f}", missing="图片未找到")
             target = os.path.join(HOT_ROOT, f)
             break
     if not target or not os.path.exists(target):

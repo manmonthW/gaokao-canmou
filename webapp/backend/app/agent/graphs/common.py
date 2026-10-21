@@ -19,7 +19,7 @@ from app.agent.contracts import AdvisorAnswer
 from app.agent.evidence import EvidenceLedger
 from app.agent.guards import append_disclaimer, verify_answer
 from app.agent.harness import completion_issues
-from app.agent.llm import make_model
+from app.agent.llm import make_model, structured_output_method
 from app.agent.prompts import REPAIR_SYSTEM, SYNTHESIZE_SYSTEM
 
 # 修复上限（§6.3）：只修一次，再失败走确定性模板。
@@ -71,7 +71,9 @@ async def _ainvoke_json(*, node: str, system: str, user: str) -> dict[str, Any]:
     空答按 §5.3 规则4 视为预算耗尽 → 抛 ModelEmptyError 供主图降级。
     解析失败也当作模型未产出有效结构 → 同样抛 ModelEmptyError（走修复/降级）。
     """
-    model = make_model(node=node).with_structured_output(AdvisorAnswer, method="json_schema")
+    model = make_model(node=node).with_structured_output(
+        AdvisorAnswer, method=structured_output_method()
+    )
     messages = [SystemMessage(content=system), HumanMessage(content=user)]
     try:
         resp = await model.ainvoke(messages)

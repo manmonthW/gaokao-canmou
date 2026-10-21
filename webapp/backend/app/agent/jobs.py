@@ -1,12 +1,11 @@
-"""Durable SQLite task store and bounded in-process Agent runner."""
+"""Durable task store (SQLite or PostgreSQL, see app.sqlstore) and bounded in-process Agent runner."""
 from __future__ import annotations
 
 import asyncio
 import hashlib
 import json
 import logging
-import os
-import sqlite3
+import threading
 import time
 import uuid
 from contextlib import contextmanager
@@ -16,6 +15,7 @@ from typing import Any
 from fastapi.concurrency import run_in_threadpool
 from fastapi.encoders import jsonable_encoder
 
+from app import sqlstore
 from app.agent import config
 from app.agent.graphs.advisor import build_advisor_graph
 from app.agent.prompts import PROMPTS_VERSION
@@ -76,6 +76,14 @@ CREATE TABLE IF NOT EXISTS agent_feedback (
     created_at TEXT NOT NULL
 );
 """
+# PostgreSQL: same columns; only the auto-increment keys differ.
+_PG_SCHEMA = (
+    _SCHEMA.replace("seq INTEGER PRIMARY KEY AUTOINCREMENT", "seq BIGSERIAL PRIMARY KEY")
+    .replace("id INTEGER PRIMARY KEY AUTOINCREMENT", "id BIGSERIAL PRIMARY KEY")
+    .replace("user_id INTEGER NOT NULL", "user_id BIGINT NOT NULL")
+)
+_init_lock = threading.Lock()
+_initialized_for: str | None = None
 
 
 def _now() -> str:
@@ -83,51 +91,71 @@ def _now() -> str:
 
 
 @contextmanager
-def _connect():
-    os.makedirs(os.path.dirname(config.AGENT_DB_PATH), exist_ok=True)
-    conn = sqlite3.connect(config.AGENT_DB_PATH, timeout=10)
-    conn.row_factory = sqlite3.Row
-    conn.execute("PRAGMA foreign_keys = ON")
-    conn.execute("PRAGMA journal_mode = WAL")
-    try:
+def _raw_connect():
+    with sqlstore.connect(config.AGENT_DB_PATH) as conn:
+        if not sqlstore.IS_PG:
+            conn.execute("PRAGMA journal_mode = WAL")
         yield conn
-        conn.commit()
-    except Exception:
-        conn.rollback()
-        raise
-    finally:
-        conn.close()
+
+
+@contextmanager
+def _connect():
+    _ensure_init()
+    with _raw_connect() as conn:
+        yield conn
+
+
+def _ensure_init() -> None:
+    target = sqlstore.APP_DB_URL or config.AGENT_DB_PATH
+    if _initialized_for != target:
+        init_db()
 
 
 def init_db() -> None:
-    with _connect() as conn:
-        conn.executescript(_SCHEMA)
-        columns = {row["name"] for row in conn.execute("PRAGMA table_info(agent_jobs)")}
-        if "request_fingerprint" not in columns:
-            conn.execute("ALTER TABLE agent_jobs ADD COLUMN request_fingerprint TEXT")
+    global _initialized_for
+    with _init_lock:
+        _init_db()
+        _initialized_for = sqlstore.APP_DB_URL or config.AGENT_DB_PATH
+
+
+def _init_db() -> None:
+    with _raw_connect() as conn:
+        sqlstore.schema_lock(conn, 7302)
+        if sqlstore.IS_PG:
+            conn.executescript(_PG_SCHEMA)
+            conn.execute("ALTER TABLE agent_jobs ADD COLUMN IF NOT EXISTS request_fingerprint TEXT")
+        else:
+            conn.executescript(_SCHEMA)
+            columns = {row["name"] for row in conn.execute("PRAGMA table_info(agent_jobs)")}
+            if "request_fingerprint" not in columns:
+                conn.execute("ALTER TABLE agent_jobs ADD COLUMN request_fingerprint TEXT")
         conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_agent_jobs_fingerprint "
             "ON agent_jobs(user_id, request_fingerprint)"
         )
-        now = _now()
-        stale = conn.execute("SELECT id FROM agent_jobs WHERE status IN ('pending','running')").fetchall()
-        conn.execute(
-            "UPDATE agent_jobs SET status='failed', error_code='restart', "
-            "error_message='服务重启，任务已终止', finished_at=? WHERE status IN ('pending','running')",
-            (now,),
-        )
-        for row in stale:
+        # A single SQLite process owns every job, so a restart orphans them all. With a shared
+        # PostgreSQL store other instances may still be running theirs; stale rows are fenced
+        # by the timeout checks in _find_active/_get instead.
+        if not sqlstore.IS_PG:
+            now = _now()
+            stale = conn.execute("SELECT id FROM agent_jobs WHERE status IN ('pending','running')").fetchall()
             conn.execute(
-                "INSERT INTO agent_events(job_id,type,message,created_at) VALUES (?,?,?,?)",
-                (row["id"], "failed", "服务重启，任务已终止", now),
+                "UPDATE agent_jobs SET status='failed', error_code='restart', "
+                "error_message='服务重启，任务已终止', finished_at=? WHERE status IN ('pending','running')",
+                (now,),
             )
+            for row in stale:
+                conn.execute(
+                    "INSERT INTO agent_events(job_id,type,message,created_at) VALUES (?,?,?,?)",
+                    (row["id"], "failed", "服务重启，任务已终止", now),
+                )
         conn.execute(
-            "DELETE FROM agent_jobs WHERE created_at < datetime('now', ?)",
-            (f"-{config.AGENT_JOB_RETENTION_HOURS} hours",),
+            "DELETE FROM agent_jobs WHERE created_at < ?",
+            (sqlstore.cutoff_text(hours=config.AGENT_JOB_RETENTION_HOURS),),
         )
         conn.execute(
-            "DELETE FROM agent_traces WHERE created_at < datetime('now', ?)",
-            (f"-{config.AGENT_TRACE_RETENTION_DAYS} days",),
+            "DELETE FROM agent_traces WHERE created_at < ?",
+            (sqlstore.cutoff_text(days=config.AGENT_TRACE_RETENTION_DAYS),),
         )
 
 
@@ -140,7 +168,7 @@ def is_allowed(user: Any) -> bool:
     return bool(candidates & config.AGENT_ALLOWLIST)
 
 
-def _row(row: sqlite3.Row | None) -> dict[str, Any] | None:
+def _row(row: Any) -> dict[str, Any] | None:
     return dict(row) if row else None
 
 
@@ -153,11 +181,11 @@ def _find_active(user_id: int):
     with _connect() as conn:
         # In-process tasks can disappear without a process restart. Fence stale rows so
         # they cannot be reused forever or block all future requests for the user.
-        stale_before = f"-{config.AGENT_JOB_TIMEOUT_SECONDS + 30} seconds"
+        stale_before = sqlstore.cutoff_text(seconds=config.AGENT_JOB_TIMEOUT_SECONDS + 30)
         stale = conn.execute(
             """SELECT id FROM agent_jobs
                WHERE user_id=? AND status IN ('pending','running')
-               AND COALESCE(started_at, created_at) < datetime('now', ?)""",
+               AND COALESCE(started_at, created_at) < ?""",
             (user_id, stale_before),
         ).fetchall()
         now = _now()
@@ -180,15 +208,16 @@ def _find_active(user_id: int):
 def _hourly_count(user_id: int) -> int:
     with _connect() as conn:
         return conn.execute(
-            "SELECT COUNT(*) n FROM agent_jobs WHERE user_id=? AND created_at >= datetime('now','-1 hour')",
-            (user_id,),
+            "SELECT COUNT(*) AS n FROM agent_jobs WHERE user_id=? AND created_at >= ?",
+            (user_id, sqlstore.cutoff_text(hours=1)),
         ).fetchone()["n"]
 
 
 def _daily_tokens() -> int:
     with _connect() as conn:
         return conn.execute(
-            "SELECT COALESCE(SUM(token_total),0) n FROM agent_jobs WHERE created_at >= datetime('now','start of day')",
+            "SELECT COALESCE(SUM(token_total),0) AS n FROM agent_jobs WHERE created_at >= ?",
+            (sqlstore.start_of_day_text(),),
         ).fetchone()["n"]
 
 
@@ -366,11 +395,7 @@ def _get(job_id: str, user_id: int, after: int):
             return None
         if job["status"] in ("pending", "running"):
             base_time = job["started_at"] or job["created_at"]
-            stale = conn.execute(
-                "SELECT ? < datetime('now', ?)",
-                (base_time, f"-{config.AGENT_JOB_TIMEOUT_SECONDS + 30} seconds"),
-            ).fetchone()[0]
-            if stale:
+            if base_time < sqlstore.cutoff_text(seconds=config.AGENT_JOB_TIMEOUT_SECONDS + 30):
                 now = _now()
                 conn.execute(
                     """UPDATE agent_jobs SET status='timeout', error_code='timeout',

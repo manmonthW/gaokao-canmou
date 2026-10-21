@@ -3,6 +3,7 @@ import os
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import FileResponse
 
+from app import assets
 from app.schemas import MetaResponse
 from app.services import meta as svc
 
@@ -47,21 +48,25 @@ _MAT_ROOT = os.environ.get(
 )
 
 
+def _combo_available(filename: str) -> bool:
+    if assets.USE_BLOB:
+        return assets.size(f"{_COMBO_DIR}/{filename}") is not None
+    return os.path.exists(os.path.join(_MAT_ROOT, _COMBO_DIR, filename))
+
+
 @router.get("/meta/subject-combos")
 async def subject_combos():
     """12 种 3+1+2 选科组合的专业覆盖率与组合分析图。"""
     items = []
     for cid, first, electives, cov, img in _COMBOS:
-        path = os.path.join(_MAT_ROOT, _COMBO_DIR, img)
         items.append({
             "id": cid, "first": first, "electives": electives,
-            "coverage": cov, "image": img, "available": os.path.exists(path),
+            "coverage": cov, "image": img, "available": _combo_available(img),
         })
-    overview_path = os.path.join(_MAT_ROOT, _COMBO_DIR, _OVERVIEW_IMG)
     return {
         "items": items,
         "overview_image": _OVERVIEW_IMG,
-        "overview_available": os.path.exists(overview_path),
+        "overview_available": _combo_available(_OVERVIEW_IMG),
         "note": ("覆盖率为全国通用参考值（第三方整理），非辽宁省专属口径；"
                  "实际可报范围以本站 2027 官方选科要求核验为准。"),
     }
@@ -80,6 +85,8 @@ async def subject_combo_image(cid: str):
                 break
     if filename is None:
         raise HTTPException(404, f"未知组合 id：{cid}")
+    if assets.USE_BLOB:
+        return assets.redirect(f"{_COMBO_DIR}/{filename}", missing="该图片尚未放入材料目录")
     path = os.path.join(_MAT_ROOT, _COMBO_DIR, filename)
     if not os.path.exists(path):
         raise HTTPException(404, "该图片尚未放入材料目录")

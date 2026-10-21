@@ -13,7 +13,7 @@ from fastapi.responses import FileResponse
 from typing import Optional
 import os
 import re
-from app import db
+from app import assets, db
 
 router = APIRouter(prefix="/hot-schools", tags=["hot-schools"])
 
@@ -137,10 +137,10 @@ async def list_schools(category: Optional[str] = Query(None, description="按分
 
 @router.get("/{name}/image")
 async def school_image(name: str):
-    """返回院校卡片原图（PNG）。裁掉顶部『嗨写志愿/每日一校』与底部二维码后返回。"""
-    from PIL import Image
-    import io
+    """返回院校卡片原图（PNG）。裁掉顶部『嗨写志愿/每日一校』与底部二维码后返回。
 
+    Blob 模式下上传的已是裁剪后的图，直接 302 跳转。
+    """
     rows = await db.fetch_all(
         "SELECT image_path FROM school_hot_profiles WHERE name = %s",
         (name,),
@@ -148,27 +148,43 @@ async def school_image(name: str):
     if not rows or not rows[0][0]:
         raise HTTPException(status_code=404, detail="图片不存在")
     candidate = rows[0][0]
+
+    if assets.USE_BLOB:
+        key = assets.key_from_material_path(candidate)
+        if not key or not key.startswith("热门大学介绍/"):
+            raise HTTPException(status_code=400, detail="非法路径")
+        return assets.redirect(key, missing="图片不存在")
+
     abs_candidate = os.path.abspath(candidate)
     # 白名单：必须位于图片根目录内
     if not abs_candidate.startswith(os.path.abspath(_IMAGE_ROOT)):
         raise HTTPException(status_code=400, detail="非法路径")
 
-    # 裁剪：顶部去掉『嗨写志愿 + 每日一校』标题区，底部去掉二维码（含上方扫码文字）
-    CROP_TOP = 140
-    CROP_BOTTOM = 200
     try:
-        im = Image.open(abs_candidate).convert("RGB")
-        w, h = im.size
-        top = min(CROP_TOP, h // 3)
-        bottom = max(0, h - min(CROP_BOTTOM, h // 3))
-        im = im.crop((0, top, w, bottom))
-        buf = io.BytesIO()
-        im.save(buf, format="PNG")
-        buf.seek(0)
-        return _png_response(buf.getvalue())
+        return _png_response(crop_card(abs_candidate))
     except Exception:
         # 裁剪失败则退回原图
         return FileResponse(abs_candidate, media_type="image/png")
+
+
+def crop_card(path: str) -> bytes:
+    """裁剪：顶部去掉『嗨写志愿 + 每日一校』标题区，底部去掉二维码（含上方扫码文字）。
+
+    Blob 上传脚本也调用本函数，保证两种部署返回同样的图。
+    """
+    from PIL import Image
+    import io
+
+    CROP_TOP = 140
+    CROP_BOTTOM = 200
+    im = Image.open(path).convert("RGB")
+    w, h = im.size
+    top = min(CROP_TOP, h // 3)
+    bottom = max(0, h - min(CROP_BOTTOM, h // 3))
+    im = im.crop((0, top, w, bottom))
+    buf = io.BytesIO()
+    im.save(buf, format="PNG")
+    return buf.getvalue()
 
 
 def _png_response(data: bytes):

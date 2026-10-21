@@ -104,15 +104,18 @@ class _Auth(httpx.Auth):
 def make_model(*, node: str) -> BaseChatModel:
     """按节点参数表构造 BaseChatModel。
 
-    node 必须是 _NODE_PARAMS 中的 key。Provider 非 ericai 时现阶段 raise NotImplementedError（留路）。
+    node 必须是 _NODE_PARAMS 中的 key。Provider 为 ericai / deepseek，其余 raise NotImplementedError（留路）。
     """
     if node not in _NODE_PARAMS:
         raise ValueError(f"未知节点参数 key: {node!r}（可选: {sorted(_NODE_PARAMS)}）")
 
+    if agent_cfg.LLM_PROVIDER == "deepseek":
+        return _make_deepseek(_NODE_PARAMS[node])
+
     if agent_cfg.LLM_PROVIDER != "ericai":
-        # deepseek/qwen 等国内已备案模型预留分支，下一批再实现
+        # qwen 等国内已备案模型预留分支
         raise NotImplementedError(
-            f"LLM_PROVIDER={agent_cfg.LLM_PROVIDER!r} 尚未实现；本批只支持 ericai。"
+            f"LLM_PROVIDER={agent_cfg.LLM_PROVIDER!r} 尚未实现；当前支持 ericai / deepseek。"
         )
 
     params = _NODE_PARAMS[node]
@@ -145,3 +148,20 @@ def make_model(*, node: str) -> BaseChatModel:
         kwargs["reasoning_effort"] = reasoning
 
     return ChatOpenAI(**kwargs)
+
+
+def _make_deepseek(params: dict) -> BaseChatModel:
+    """DeepSeek OpenAI 兼容接口：用 max_tokens，不传 reasoning_effort（5.6 规则不适用）。"""
+    return ChatOpenAI(
+        model=agent_cfg.DEEPSEEK_MODEL,
+        api_key=agent_cfg.deepseek_api_key(),
+        base_url=agent_cfg.DEEPSEEK_BASE_URL,
+        max_tokens=params["max_completion_tokens"],
+        timeout=params["timeout"],
+        max_retries=1,
+    )
+
+
+def structured_output_method() -> str:
+    """结构化输出方式：DeepSeek 不支持 response_format=json_schema，改走 function calling。"""
+    return "function_calling" if agent_cfg.LLM_PROVIDER == "deepseek" else "json_schema"
