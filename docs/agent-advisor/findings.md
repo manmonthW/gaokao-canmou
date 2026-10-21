@@ -164,3 +164,13 @@ sol/luna/terra 同一问题对比（用三句话解释平行/顺序志愿区别�
 - PPT 项目 LLM 客户端：`~/projects/ai-ppt-generator/backend/app/llm/client.py`
 - GPT-5.6 直连：`~/ericsson-ai/gpt56_direct.py`
 - EWS 部署经验：`webapp/docs/EWS_DEPLOY_LESSONS.md`（不入库）
+# Zhangxuefeng Skill Assessment (2026-09-17)
+
+- The external repository is a prompt-only persona package, not a tested software integration. It contains `SKILL.md`, research notes, examples, images, and an MIT license, but no typed schemas, executable tests, or reproducible source manifest.
+- Useful concepts are constraint discovery, ordinary/median-outcome reasoning, employment-backward analysis, employer-behavior checks, reversibility, city/resource tradeoffs, and conclusion-first writing.
+- Direct use is rejected because it requires first-person impersonation, suppresses uncertainty, encourages adversarial/violent/class-stigmatizing language, embeds unsupported statistics, mandates broad WebSearch, and includes hidden filesystem/network update instructions.
+- Several source claims are internally inconsistent in dates, prices, and quote wording. Research files are discovery leads only, never runtime evidence.
+- MIT permits modification with notice, but does not settle public-figure identity/endorsement, quotation, trademark, or asset rights.
+- Architecture decision: adapt only a neutral **现实因素分析** conditional workflow inside the existing deterministic shell. Stage 1 uses no new web or employment data. Any later factual expansion requires curated, versioned, typed evidence tools.
+- Full design: `docs/agent-advisor/zhangxuefeng-adaptation-plan.md`.
+- Decision status: recorded and deferred. Future implementation requires an explicit reopening decision; this assessment alone does not authorize code, prompt, data, or deployment changes.

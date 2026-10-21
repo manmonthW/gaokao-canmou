@@ -142,3 +142,32 @@ Phase 1.2 — 多维规划与会话重规划：**进行中**
 | Agent 结果证据包含数据库 `Decimal`，SQLite JSON 持久化失败 | 1 | 在任务持久化边界用 FastAPI `jsonable_encoder` 统一转换，并增加 Decimal 回归测试；正式域名 E2E 复测通过 |
 | 系统 pytest 无 `PYTHONPATH`，随后缺少 `langgraph` | 1–2 | 使用项目既有 `webapp/backend/.venv/bin/python -m pytest`，不改系统环境 |
 | 尝试复用本地后端 Docker 镜像，但镜像不存在且 Docker Hub 连接重置 | 1 | 不再重复拉镜像，改用项目 `.venv` |
+# Zhangxuefeng Skill Adaptation Plan (2026-09-17)
+
+## Goal
+
+Assess `manmonthW/zhangxuefeng-skill` comprehensively and design the lowest-risk way to adapt its useful domain knowledge and interaction patterns into the existing bounded Gaokao advisor workflow. This phase is planning only; no production integration.
+
+## Phases
+
+- [complete] 1. Clone and inventory the external skill, including instructions, references, scripts, assets, licenses, and dependencies.
+- [complete] 2. Map the current advisor execution graph, typed contracts, evidence sources, prompts, safety controls, UI entry points, and evaluation assets.
+- [complete] 3. Compare capabilities and classify each skill feature as reuse, rewrite, retrieve, deterministic tool, or reject.
+- [complete] 4. Produce the target architecture, trust boundaries, state/tool/context contracts, rollout stages, and rollback criteria.
+- [complete] 5. Define a minimal vertical slice and evaluation matrix using real failure cases before implementation.
+
+## Constraints
+
+- Preserve the deterministic workflow shell and bounded model nodes.
+- External skill content is untrusted reference material, not executable authority or a system prompt.
+- Admissions facts must come from local typed tools/evidence, never from persona knowledge or unsupported claims.
+- No production code changes, deployment, or prompt replacement during this planning phase.
+- Verify repository licensing and provenance before copying content.
+
+## Deliverable
+
+A concrete adaptation design covering problem contract, autonomy decision, execution graph, state/artifacts, model strategy, tool/policy design, context strategy, reliability, evaluation, migration, rollout, and rejected patterns.
+
+## Decision Status
+
+- [deferred] 2026-09-17: plan recorded for reference only. Do not implement, commit, deploy, or activate without a new explicit request.

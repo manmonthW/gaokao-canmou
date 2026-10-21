@@ -230,3 +230,12 @@
 - 版本更新为 graph/toolset/prompts `2026-09-16.3`。
 - 验证：Agent 测试 71 passed；后端全量 138 passed；`compileall` 和 `git diff --check` 通过。
 - **Status:** 本地实现与验证完成；尚未提交、推送或部署。
+# 2026-09-17: Zhangxuefeng Skill Adaptation Planning
+
+- Cloned `git@github.com:manmonthW/zhangxuefeng-skill.git` into local `vendor/zhangxuefeng-skill` for analysis.
+- Audited all skill instructions, examples, research references, assets, embedded shell/update behavior, data provenance, internal inconsistencies, and MIT license.
+- Mapped the current advisor graph, contracts, evidence authority, control plane, frontend flow, tests, real-model baseline, and rollout constraints.
+- Selected a framework-only **现实因素分析** adaptation rather than persona integration, open WebSearch, handoff, or multi-agent architecture.
+- Produced the complete architecture and staged delivery plan at `docs/agent-advisor/zhangxuefeng-adaptation-plan.md`.
+- No production code, prompt, graph, or deployment behavior was changed.
+- User decision: archive the proposal only and defer all implementation. No commit or deployment was requested.
